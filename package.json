@@ -16,13 +16,16 @@
     "cesium": "latest",
     "lucide-react": "latest",
     "maplibre-gl": "latest",
+    "pg": "^8.21.0",
     "pmtiles": "^4.4.1",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "redis": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/node": "^25.9.3",
+    "@types/pg": "^8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "autoprefixer": "latest",

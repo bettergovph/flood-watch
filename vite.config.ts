@@ -8,28 +8,34 @@ import cesium from 'vite-plugin-cesium';
 type EnvMap = Record<string, string>;
 
 type BoundingBox = { west: number; south: number; east: number; north: number };
-type RegionSearchArea = BoundingBox & { region: string };
 type ProjectHit = { contractId?: string; latitude?: number; longitude?: number; [key: string]: unknown };
 
-const regionSearchAreas: RegionSearchArea[] = [
-  { region: 'Region I', west: 119.7, south: 15.6, east: 121.2, north: 18.8 },
-  { region: 'Region II', west: 120.6, south: 15.5, east: 122.6, north: 19.0 },
-  { region: 'Region III', west: 119.7, south: 14.3, east: 121.4, north: 16.0 },
-  { region: 'Region IV-A', west: 120.2, south: 13.5, east: 122.4, north: 15.0 },
-  { region: 'Region IV-B', west: 116.8, south: 9.0, east: 122.5, north: 13.8 },
-  { region: 'Region V', west: 122.3, south: 11.5, east: 124.6, north: 14.2 },
-  { region: 'Region VI', west: 121.4, south: 9.7, east: 123.7, north: 12.4 },
-  { region: 'Region VII', west: 123.0, south: 9.0, east: 125.0, north: 11.4 },
-  { region: 'Region VIII', west: 124.1, south: 10.0, east: 126.8, north: 12.9 },
-  { region: 'Region IX', west: 121.8, south: 6.6, east: 123.7, north: 8.6 },
-  { region: 'Region X', west: 123.5, south: 7.4, east: 125.7, north: 9.7 },
-  { region: 'Region XI', west: 125.0, south: 5.9, east: 126.8, north: 8.4 },
-  { region: 'Region XII', west: 124.0, south: 5.5, east: 125.6, north: 7.9 },
-  { region: 'Region XIII', west: 124.6, south: 7.7, east: 126.6, north: 10.1 },
-  { region: 'National Capital Region', west: 120.85, south: 14.35, east: 121.2, north: 14.85 },
-  { region: 'BARMM', west: 119.8, south: 4.6, east: 125.4, north: 8.4 },
-  { region: 'Cordillera Administrative Region', west: 120.4, south: 16.1, east: 121.5, north: 17.8 },
-];
+type DbProjectRow = {
+  contract_id: string;
+  description: string;
+  category: string | null;
+  component_categories: unknown;
+  status: string | null;
+  budget: string | number | null;
+  amount_paid: string | number | null;
+  progress: string | number | null;
+  location: Record<string, unknown> | null;
+  contractor: string | null;
+  start_date: string | null;
+  completion_date: string | null;
+  infra_year: string | null;
+  program_name: string | null;
+  source_of_funds: string | null;
+  is_live: boolean | null;
+  livestream_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  report_count: number | null;
+  has_satellite_image: boolean | null;
+};
+
+let pgPoolPromise: Promise<import('pg').Pool> | null = null;
+let redisClientPromise: Promise<import('redis').RedisClientType> | null = null;
 
 function parseBbox(value: string | null): BoundingBox | null {
   if (!value) return null;
@@ -38,35 +44,135 @@ function parseBbox(value: string | null): BoundingBox | null {
   return { west, south, east, north };
 }
 
-function boxesIntersect(a: BoundingBox, b: BoundingBox) {
-  return a.west <= b.east && a.east >= b.west && a.south <= b.north && a.north >= b.south;
-}
-
-function hitWithinBbox(hit: ProjectHit, bbox: BoundingBox, paddingRatio = 0.08) {
-  const lng = Number(hit.longitude);
-  const lat = Number(hit.latitude);
-  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
-  const lngPad = Math.max(0.05, (bbox.east - bbox.west) * paddingRatio);
-  const latPad = Math.max(0.05, (bbox.north - bbox.south) * paddingRatio);
-  return lng >= bbox.west - lngPad && lng <= bbox.east + lngPad && lat >= bbox.south - latPad && lat <= bbox.north + latPad;
-}
-
-
-function readProjectWatchEnv(): EnvMap {
-  const envPath = resolve(__dirname, '../project-watch/.env');
+function readProjectEnv(): EnvMap {
+  const envFiles = [resolve(__dirname, '.env.local'), resolve(__dirname, '.env')];
   const values: EnvMap = {};
-  try {
-    const raw = readFileSync(envPath, 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
-      const [key, ...rest] = trimmed.split('=');
-      values[key.trim()] = rest.join('=').trim().replace(/^['"]|['"]$/g, '');
+  for (const envPath of envFiles) {
+    try {
+      const raw = readFileSync(envPath, 'utf8');
+      for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+        const [key, ...rest] = trimmed.split('=');
+        values[key.trim()] = rest.join('=').trim().replace(/^['"]|['"]$/g, '');
+      }
+    } catch {
+      // Optional local configuration.
     }
-  } catch {
-    // The API route will return a helpful error if credentials are missing.
   }
-  return values;
+  return { ...values, ...process.env } as EnvMap;
+}
+
+async function getPgPool() {
+  if (!pgPoolPromise) {
+    pgPoolPromise = import('pg').then(({ Pool }) => {
+      const env = readProjectEnv();
+      return env.DATABASE_URL
+        ? new Pool({ connectionString: env.DATABASE_URL, max: Number(env.PGPOOL_MAX) || 8 })
+        : new Pool({ database: 'floodlens', host: '/var/run/postgresql', max: Number(env.PGPOOL_MAX) || 8 });
+    });
+  }
+  return pgPoolPromise;
+}
+
+async function getRedisClient() {
+  if (process.env.FLOODLENS_DISABLE_REDIS === '1') return null;
+  if (!redisClientPromise) {
+    redisClientPromise = import('redis').then(async ({ createClient }) => {
+      const env = readProjectEnv();
+      const client = createClient({ url: env.REDIS_URL || 'redis://127.0.0.1:6379' });
+      client.on('error', (error) => console.warn('[floodlens] redis cache error:', error instanceof Error ? error.message : error));
+      await client.connect();
+      return client as import('redis').RedisClientType;
+    });
+  }
+  try {
+    return await redisClientPromise;
+  } catch (error) {
+    console.warn('[floodlens] redis unavailable; continuing without cache:', error instanceof Error ? error.message : error);
+    redisClientPromise = null;
+    return null;
+  }
+}
+
+function toNumber(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function toProject(row: DbProjectRow): ProjectHit {
+  return {
+    contractId: row.contract_id,
+    description: row.description,
+    category: row.category ?? '',
+    componentCategories: row.component_categories,
+    status: row.status ?? '',
+    budget: toNumber(row.budget),
+    amountPaid: toNumber(row.amount_paid),
+    progress: toNumber(row.progress),
+    location: row.location ?? {},
+    contractor: row.contractor ?? '',
+    startDate: row.start_date,
+    completionDate: row.completion_date,
+    infraYear: row.infra_year ?? '',
+    programName: row.program_name ?? '',
+    sourceOfFunds: row.source_of_funds ?? '',
+    isLive: Boolean(row.is_live),
+    livestreamUrl: row.livestream_url,
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    reportCount: row.report_count ?? 0,
+    hasSatelliteImage: Boolean(row.has_satellite_image),
+  };
+}
+
+function buildProjectSearchSql(query: string, bbox: BoundingBox | null, limit: number) {
+  const values: Array<string | number> = [];
+  const clauses = ["category = 'Flood Control and Drainage'", 'geom IS NOT NULL'];
+  if (bbox) {
+    values.push(bbox.west, bbox.south, bbox.east, bbox.north);
+    clauses.push(`geom && ST_MakeEnvelope($${values.length - 3}, $${values.length - 2}, $${values.length - 1}, $${values.length}, 4326)`);
+  }
+  const trimmedQuery = query.trim();
+  let orderBy = 'budget DESC NULLS LAST, contract_id ASC';
+  if (trimmedQuery) {
+    values.push(`%${trimmedQuery}%`, trimmedQuery);
+    const likeParam = values.length - 1;
+    const textParam = values.length;
+    clauses.push(`(
+      description ILIKE $${likeParam}
+      OR contractor ILIKE $${likeParam}
+      OR program_name ILIKE $${likeParam}
+      OR source_of_funds ILIKE $${likeParam}
+      OR contract_id ILIKE $${likeParam}
+      OR location::text ILIKE $${likeParam}
+    )`);
+    orderBy = `GREATEST(similarity(description, $${textParam}), similarity(contractor, $${textParam}), similarity(location::text, $${textParam})) DESC, budget DESC NULLS LAST`;
+  }
+  values.push(limit);
+  const limitParam = values.length;
+  const whereSql = clauses.join('\n      AND ');
+  return {
+    values,
+    sql: `
+      WITH filtered AS (
+        SELECT *
+        FROM dpwh_projects
+        WHERE ${whereSql}
+      ), counted AS (
+        SELECT count(*)::int AS total FROM filtered
+      )
+      SELECT
+        contract_id, description, category, component_categories, status, budget, amount_paid, progress,
+        location, contractor, start_date::text, completion_date::text, infra_year, program_name, source_of_funds,
+        is_live, livestream_url, latitude, longitude, report_count, has_satellite_image,
+        (SELECT total FROM counted) AS estimated_total_hits
+      FROM filtered
+      ORDER BY ${orderBy}
+      LIMIT $${limitParam}
+    `,
+  };
 }
 
 function floodControlProjectsApi(): Plugin {
@@ -74,117 +180,53 @@ function floodControlProjectsApi(): Plugin {
     name: 'flood-control-projects-api',
     configureServer(server) {
       server.middlewares.use('/api/flood-control-projects', async (req, res) => {
+        const startedAt = Date.now();
         try {
-          const env = readProjectWatchEnv();
-          const host = env.VITE_MEILISEARCH_HOST || 'https://search2.bettergov.ph';
-          const apiKey = env.VITE_MEILISEARCH_SEARCH_API_KEY;
-          const indexUid = env.VITE_MEILISEARCH_INDEX || 'dpwh';
-          if (!apiKey) {
-            res.statusCode = 500;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ error: 'Missing Project Watch Meilisearch search key' }));
-            return;
-          }
-
           const url = new URL(req.url || '', 'http://localhost');
           const query = url.searchParams.get('q') || '';
           const limit = Math.min(Number(url.searchParams.get('limit')) || 250, 1200);
-          const zoom = Number(url.searchParams.get('zoom')) || 0;
           const bbox = parseBbox(url.searchParams.get('bbox'));
-          const attributesToRetrieve = [
-            'contractId',
-            'description',
-            'category',
-            'componentCategories',
-            'status',
-            'budget',
-            'amountPaid',
-            'progress',
-            'location',
-            'contractor',
-            'startDate',
-            'completionDate',
-            'infraYear',
-            'programName',
-            'sourceOfFunds',
-            'isLive',
-            'livestreamUrl',
-            'latitude',
-            'longitude',
-            'reportCount',
-            'hasSatelliteImage',
-          ];
-          const visibleRegions = bbox ? regionSearchAreas.filter((area) => boxesIntersect(area, bbox)) : [];
-          const shouldFanOutByRegion = Boolean(bbox && zoom > 0 && zoom < 10 && visibleRegions.length > 1);
-          const regionalLimit = shouldFanOutByRegion ? Math.max(80, Math.ceil(limit / Math.max(1, visibleRegions.length))) : 0;
-          const queries = [
-            {
-              indexUid,
-              q: query,
-              filter: ['category = "Flood Control and Drainage"'],
-              limit,
-              attributesToRetrieve,
-            },
-            ...(shouldFanOutByRegion
-              ? visibleRegions.map((area) => ({
-                  indexUid,
-                  q: '',
-                  filter: ['category = "Flood Control and Drainage"', `location.region = "${area.region}"`],
-                  limit: regionalLimit,
-                  attributesToRetrieve,
-                }))
-              : []),
-          ];
-          const body = { queries };
-
-          const response = await fetch(`${host}/multi-search`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(body),
-          });
-
-          const payload = await response.text();
-          res.statusCode = response.status;
-          res.setHeader('Content-Type', response.headers.get('Content-Type') || 'application/json');
-          res.setHeader('Cache-Control', 'no-store');
-          if (!response.ok || !bbox) {
-            res.end(payload);
+          const zoom = Number(url.searchParams.get('zoom')) || 0;
+          const cacheKey = `flood-control-projects:v2:${query}:${limit}:${zoom.toFixed(2)}:${bbox ? `${bbox.west},${bbox.south},${bbox.east},${bbox.north}` : 'none'}`;
+          const redis = await getRedisClient();
+          const cached = redis ? await redis.get(cacheKey) : null;
+          if (cached) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Cache-Control', 'public, max-age=30');
+            res.setHeader('X-FloodLens-Cache', 'HIT');
+            res.end(cached);
             return;
           }
 
-          const parsed = JSON.parse(payload) as { results?: Array<{ hits?: ProjectHit[]; estimatedTotalHits?: number; processingTimeMs?: number }> };
-          const sourceResults = parsed.results ?? [];
-          const seen = new Set<string>();
-          const mergedHits = (shouldFanOutByRegion ? sourceResults.flatMap((result) => result.hits ?? []) : (sourceResults[0]?.hits ?? []))
-            .filter((hit) => hitWithinBbox(hit, bbox))
-            .filter((hit) => {
-              const key = String(hit.contractId ?? `${hit.latitude},${hit.longitude}`);
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            })
-            .slice(0, limit);
-
-          res.end(JSON.stringify({
+          const pool = await getPgPool();
+          const { sql, values } = buildProjectSearchSql(query, bbox, limit);
+          const dbResult = await pool.query<DbProjectRow & { estimated_total_hits: number }>(sql, values);
+          const hits = dbResult.rows.map(toProject);
+          const total = dbResult.rows[0]?.estimated_total_hits ?? hits.length;
+          const body = JSON.stringify({
             results: [{
-              indexUid,
-              hits: mergedHits,
+              indexUid: 'postgis.dpwh_projects',
+              hits,
               query,
-              processingTimeMs: Math.max(...sourceResults.map((result) => result.processingTimeMs ?? 0), 0),
+              processingTimeMs: Date.now() - startedAt,
               limit,
               offset: 0,
-              estimatedTotalHits: shouldFanOutByRegion ? Math.max(mergedHits.length, ...sourceResults.map((result) => result.estimatedTotalHits ?? 0)) : mergedHits.length,
-              searchStrategy: shouldFanOutByRegion ? 'viewport-region-fanout' : 'viewport-bbox-filter',
-              visibleRegions: visibleRegions.map((area) => area.region),
+              estimatedTotalHits: total,
+              searchStrategy: bbox ? 'postgis-bbox-gist' : 'postgis-national',
+              visibleRegions: [],
             }],
-          }));
+          });
+          if (redis) await redis.set(cacheKey, body, { EX: Number(process.env.FLOODLENS_CACHE_SECONDS) || 60 });
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'public, max-age=30');
+          res.setHeader('X-FloodLens-Cache', 'MISS');
+          res.end(body);
         } catch (error) {
           res.statusCode = 500;
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown Meilisearch proxy error' }));
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown PostGIS project search error' }));
         }
       });
     },

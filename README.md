@@ -32,6 +32,25 @@ curl -L -o data/noah/noah_hazard_maps.pmtiles \
   https://huggingface.co/datasets/bettergovph/project-noah-hazard-maps/resolve/main/PMTiles/noah_hazard_maps.pmtiles
 ```
 
+## DPWH project mirror
+
+FloodLens mirrors the BetterGov DPWH project API into local PostGIS for reliable latitude/longitude and bounding-box lookups:
+
+```bash
+sudo systemctl enable --now postgresql redis-server
+createdb floodlens
+psql postgres:///floodlens -f scripts/dpwh_postgis_schema.sql
+scripts/sync_dpwh_projects.py
+```
+
+The sync downloads `https://api.dpwh.bettergov.ph/projects` into ignored local artifacts under `data/dpwh/`, then bulk-loads `dpwh_projects` with a generated `geom geometry(Point, 4326)` column and GiST/trigram indexes. The Vite dev API at `/api/flood-control-projects` reads from PostGIS and uses Redis for short-lived response caching.
+
+Default local services:
+
+- `DATABASE_URL`: unset uses the local Unix-socket database `floodlens`; set a Postgres URL to override.
+- `REDIS_URL`: defaults to `redis://127.0.0.1:6379`.
+- `FLOODLENS_CACHE_SECONDS`: defaults to `60`.
+
 ## Development
 
 ```bash
