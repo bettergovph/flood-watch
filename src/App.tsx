@@ -349,7 +349,11 @@ function MapPreview({
           noah: { type: 'vector', url: `pmtiles://${window.location.origin}${datasetUrl}`, attribution: 'Project NOAH / BetterGov.ph' },
           floodConcentration: { type: 'geojson', data: floodConcentration },
           'terrain-dem': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', attribution: 'Terrain: AWS Open Data Terrarium DEM' },
-          buildings: { type: 'vector', tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14, attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
+          // OSMBuildings' standalone package is Leaflet/OpenLayers-era and does not
+          // integrate cleanly with MapLibre. OpenFreeMap exposes the same OSM-derived
+          // building footprints as vector tiles, so render them natively with
+          // MapLibre fill-extrusion layers instead.
+          buildings: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
           floodControlProjects: { type: 'geojson', data: asProjectGeojson([]) },
           mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
         },
@@ -414,35 +418,6 @@ function MapPreview({
           'text-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.72, 7.2, 0],
         },
       });
-      map.addLayer({
-        id: 'building-extrusions',
-        type: 'fill-extrusion',
-        source: 'buildings',
-        'source-layer': 'building',
-        minzoom: 12,
-        layout: { visibility: 'none' },
-        paint: {
-          'fill-extrusion-color': '#dbeafe',
-          'fill-extrusion-opacity': 0.52,
-          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]],
-          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-        },
-      });
-      map.addLayer({
-        id: 'house-extrusions',
-        type: 'fill-extrusion',
-        source: 'buildings',
-        'source-layer': 'building',
-        minzoom: 14,
-        filter: ['any', ['==', ['get', 'class'], 'house'], ['==', ['get', 'class'], 'residential'], ['==', ['get', 'type'], 'house'], ['==', ['get', 'type'], 'residential'], ['==', ['get', 'building'], 'house'], ['==', ['get', 'building'], 'residential']],
-        layout: { visibility: 'none' },
-        paint: {
-          'fill-extrusion-color': '#fef3c7',
-          'fill-extrusion-opacity': 0.68,
-          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 16, ['coalesce', ['get', 'render_height'], ['get', 'height'], 7]],
-          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-        },
-      });
       sourceLayers.forEach((layer) => {
         map.addLayer({
           id: `hazard-${layer}`,
@@ -451,6 +426,40 @@ function MapPreview({
           'source-layer': layer,
           paint: { 'fill-color': hazardColor(layer) as maplibregl.ExpressionSpecification, 'fill-opacity': 0.58, 'fill-outline-color': 'rgba(255,255,255,0.35)' },
         });
+      });
+      map.addLayer({
+        id: 'building-extrusions',
+        type: 'fill-extrusion',
+        source: 'buildings',
+        'source-layer': 'building',
+        minzoom: 13,
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-extrusion-color': ['coalesce', ['get', 'colour'], '#dbeafe'],
+          'fill-extrusion-opacity': 0.58,
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, ['coalesce', ['get', 'render_height'], 10]],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+          'fill-extrusion-vertical-gradient': true,
+        },
+      });
+      map.addLayer({
+        id: 'house-extrusions',
+        type: 'fill-extrusion',
+        source: 'buildings',
+        'source-layer': 'building',
+        minzoom: 14,
+        // OpenFreeMap's public building layer exposes height/color fields but not
+        // a reliable residential class. Treat low-rise buildings as a useful
+        // proxy for houses/footprints until a richer local OSM extract is added.
+        filter: ['<=', ['coalesce', ['get', 'render_height'], 8], 12],
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-extrusion-color': '#fef3c7',
+          'fill-extrusion-opacity': 0.72,
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 16, ['coalesce', ['get', 'render_height'], 7]],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+          'fill-extrusion-vertical-gradient': true,
+        },
       });
       map.addLayer({ id: 'flood-control-project-heat', type: 'heatmap', source: 'floodControlProjects', maxzoom: 8.5, paint: { 'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'budget'], 0], 0, 0.35, 100000000, 1], 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.9, 8, 1.9], 'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(249,115,22,0)', 0.35, 'rgba(251,146,60,0.45)', 0.7, 'rgba(249,115,22,0.7)', 1, 'rgba(220,38,38,0.9)'], 'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 18, 8, 48], 'heatmap-opacity': 0.8 } });
       map.addLayer({ id: 'flood-control-project-pins', type: 'circle', source: 'floodControlProjects', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 12, 8, 15, 11], 'circle-color': '#f97316', 'circle-opacity': 0.92, 'circle-stroke-color': '#fff7ed', 'circle-stroke-width': 1.8 } });
