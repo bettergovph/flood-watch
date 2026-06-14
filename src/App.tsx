@@ -25,9 +25,10 @@ import {
 
 type Scenario = 'Clear' | '5-Year Flood' | '25-Year Flood' | '50-Year Flood' | '100-Year Flood';
 type Tool = 'Flood Wall' | 'Retention Basin' | 'Diversion Channel' | 'Pump Station';
-type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'buildings' | 'houses';
+type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'projects' | 'buildings' | 'houses';
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
 type MobilePanel = 'map' | 'browse' | 'terrain' | 'simulate' | 'impact';
+type ProjectFilter = 'all' | 'ongoing' | 'completed' | 'withReports' | 'withSatellite' | 'largeBudget';
 
 type LocationPreset = { name: string; subtitle: string; center: [number, number]; zoom: number; national?: boolean; projectQuery: string };
 type FloodControlProject = {
@@ -144,6 +145,24 @@ function escapeHtml(value: unknown) {
 
 function projectLocation(project: FloodControlProject) {
   return [project.location?.municipality, project.location?.province, project.location?.region].filter(Boolean).join(', ') || 'Unknown location';
+}
+
+const projectFilters: Array<{ key: ProjectFilter; label: string; description: string }> = [
+  { key: 'all', label: 'All', description: 'Every returned DPWH flood-control project' },
+  { key: 'ongoing', label: 'Ongoing', description: 'Projects not marked completed' },
+  { key: 'completed', label: 'Completed', description: 'Finished projects' },
+  { key: 'withReports', label: 'With reports', description: 'Has citizen/monitoring reports' },
+  { key: 'withSatellite', label: 'Satellite', description: 'Has satellite imagery' },
+  { key: 'largeBudget', label: '₱100M+', description: 'Large-budget projects' },
+];
+
+function filterFloodControlProjects(projects: FloodControlProject[], filter: ProjectFilter) {
+  if (filter === 'all') return projects;
+  if (filter === 'ongoing') return projects.filter((project) => !String(project.status ?? '').toLowerCase().includes('completed'));
+  if (filter === 'completed') return projects.filter((project) => String(project.status ?? '').toLowerCase().includes('completed'));
+  if (filter === 'withReports') return projects.filter((project) => (project.reportCount ?? 0) > 0);
+  if (filter === 'withSatellite') return projects.filter((project) => Boolean(project.hasSatelliteImage));
+  return projects.filter((project) => (project.budget ?? 0) >= 100_000_000);
 }
 
 function asProjectGeojson(projects: FloodControlProject[]) {
@@ -368,7 +387,8 @@ function MapPreview({
           paint: { 'fill-color': hazardColor(layer) as maplibregl.ExpressionSpecification, 'fill-opacity': 0.58, 'fill-outline-color': 'rgba(255,255,255,0.35)' },
         });
       });
-      map.addLayer({ id: 'flood-control-project-pins', type: 'circle', source: 'floodControlProjects', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 4, 12, 7, 15, 10], 'circle-color': '#f97316', 'circle-opacity': 0.9, 'circle-stroke-color': '#fff7ed', 'circle-stroke-width': 1.6 } });
+      map.addLayer({ id: 'flood-control-project-heat', type: 'heatmap', source: 'floodControlProjects', maxzoom: 8.5, paint: { 'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'budget'], 0], 0, 0.35, 100000000, 1], 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.9, 8, 1.9], 'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(249,115,22,0)', 0.35, 'rgba(251,146,60,0.45)', 0.7, 'rgba(249,115,22,0.7)', 1, 'rgba(220,38,38,0.9)'], 'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 18, 8, 48], 'heatmap-opacity': 0.8 } });
+      map.addLayer({ id: 'flood-control-project-pins', type: 'circle', source: 'floodControlProjects', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 12, 8, 15, 11], 'circle-color': '#f97316', 'circle-opacity': 0.92, 'circle-stroke-color': '#fff7ed', 'circle-stroke-width': 1.8 } });
       map.addLayer({ id: 'flood-control-project-labels', type: 'symbol', source: 'floodControlProjects', minzoom: 10, layout: { 'text-field': ['get', 'contractId'], 'text-size': 10, 'text-offset': [0, 1.25], 'text-anchor': 'top', 'text-allow-overlap': false }, paint: { 'text-color': '#fed7aa', 'text-halo-color': '#431407', 'text-halo-width': 1.2 } });
       map.addLayer({ id: 'mitigation-fill', type: 'fill', source: 'mitigation', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#22c55e', 'fill-opacity': 0.28, 'fill-outline-color': '#bbf7d0' } });
       map.addLayer({ id: 'mitigation-line', type: 'line', source: 'mitigation', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': '#facc15', 'line-width': 5, 'line-dasharray': [2, 1] } });
@@ -427,6 +447,10 @@ function MapPreview({
     const map = mapRef.current;
     if (!map) return;
     const applyVisibility = () => {
+      ['flood-control-project-heat', 'flood-control-project-pins', 'flood-control-project-labels'].forEach((id) => {
+        if (!map.getLayer(id)) return;
+        map.setLayoutProperty(id, 'visibility', visibleLayers.projects ? 'visible' : 'none');
+      });
       ['building-extrusions', 'house-extrusions'].forEach((id) => {
         if (!map.getLayer(id)) return;
         const visible = id === 'building-extrusions' ? visibleLayers.buildings : visibleLayers.houses;
@@ -504,25 +528,28 @@ export default function App() {
   const [scenarioName, setScenarioName] = useState<Scenario>('100-Year Flood');
   const [opacity, setOpacity] = useState(0.58);
   const [selectedLocation, setSelectedLocation] = useState(locations[0]);
-  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false, buildings: false, houses: false });
+  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false, projects: true, buildings: false, houses: false });
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [terrainExaggeration, setTerrainExaggeration] = useState(2.2);
   const [drawingTool, setDrawingTool] = useState<Tool | null>(null);
   const [projects, setProjects] = useState<InfrastructureProject[]>([]);
   const [floodControlProjects, setFloodControlProjects] = useState<FloodControlProject[]>([]);
   const [selectedFloodControlProject, setSelectedFloodControlProject] = useState<FloodControlProject | null>(null);
+  const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
   const [projectSearchState, setProjectSearchState] = useState<{ loading: boolean; error: string | null; total: number }>({ loading: true, error: null, total: 0 });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('map');
-  const [desktopView, setDesktopView] = useState<'landing' | 'terrain'>('landing');
+  const [desktopView, setDesktopView] = useState<'landing' | 'terrain'>(() => (new URLSearchParams(window.location.search).get('v') === 'project' ? 'terrain' : 'landing'));
   const [navigationSeq, setNavigationSeq] = useState(0);
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName) ?? scenarios[4], [scenarioName]);
   const totalBenefit = Math.min(0.72, projects.reduce((sum, project) => sum + project.benefitScore, 0));
   const after = { affected: scenario.affected * (1 - totalBenefit), homes: scenario.homes * (1 - totalBenefit), roads: scenario.roads * (1 - totalBenefit * 0.8), assets: scenario.assets * (1 - totalBenefit * 0.9) };
+  const filteredFloodControlProjects = useMemo(() => filterFloodControlProjects(floodControlProjects, projectFilter), [floodControlProjects, projectFilter]);
   const toggleLayer = (layer: LayerKey) => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const jumpToLocation = (location: LocationPreset) => {
     setProjectSearchState({ loading: true, error: null, total: 0 });
     setSelectedFloodControlProject(null);
+    setProjectFilter('all');
     setSelectedLocation({ ...location });
     setNavigationSeq((value) => value + 1);
   };
@@ -578,7 +605,7 @@ export default function App() {
     { key: 'impact' as const, label: 'Impact', icon: BarChart3 },
   ];
 
-  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, navigationSeq };
+  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: filteredFloodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
@@ -594,8 +621,13 @@ export default function App() {
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Scenario</div><div className="font-bold text-cyan-200">{scenario.name}</div></div>
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-cyan-200">{selectedLocation.name}</div></div>
-          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(floodControlProjects.length)} shown${projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
+          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} shown${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
         </div>
+      </div>
+
+      <div className="rounded-3xl border border-orange-200/20 bg-slate-950/90 p-5 backdrop-blur-2xl">
+        <div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.2em] text-orange-200">Project overlay</div><h3 className="mt-1 font-bold text-white">DPWH flood-control filters</h3></div><label className="flex items-center gap-2 text-sm text-orange-100"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label></div>
+        <div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => { setProjectFilter(filter.key); setSelectedFloodControlProject(null); }} className={`rounded-2xl border p-3 text-left text-sm transition ${projectFilter === filter.key ? 'border-orange-300 bg-orange-300 text-slate-950' : 'border-white/10 bg-white/5 text-white hover:bg-white/10'}`}><span className="block font-semibold">{filter.label}</span><span className="mt-1 block text-xs opacity-75">{filter.description}</span></button>)}</div>
       </div>
 
       {selectedFloodControlProject && (
@@ -630,7 +662,7 @@ export default function App() {
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
         <div className="mb-3 flex items-center gap-2 font-bold"><Eye className="h-4 w-4 text-cyan-300" /> Layers</div>
-        <div className="space-y-2">{([{ key: 'flood', label: 'Flood scenario + national concentration' }, { key: 'landslide', label: 'Landslide hazards' }, { key: 'stormSurge', label: 'Storm surge hazards' }, { key: 'debrisFlow', label: 'Debris-flow hazards' }, { key: 'buildings', label: '3D buildings' }, { key: 'houses', label: 'Houses / residential footprints' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div>
+        <div className="space-y-2">{([{ key: 'flood', label: 'Flood scenario + national concentration' }, { key: 'landslide', label: 'Landslide hazards' }, { key: 'stormSurge', label: 'Storm surge hazards' }, { key: 'debrisFlow', label: 'Debris-flow hazards' }, { key: 'projects', label: 'DPWH flood-control projects' }, { key: 'buildings', label: '3D buildings' }, { key: 'houses', label: 'Houses / residential footprints' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div>
         <label className="mt-4 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-2 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
       </div>
 
@@ -667,8 +699,8 @@ export default function App() {
                 <div className="space-y-5">
                   <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
                   <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
-                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(floodControlProjects.length)} shown for {selectedLocation.name}</div>
-                  <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
+                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} shown for {selectedLocation.name}</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-orange-300 text-slate-950' : 'bg-white/10 text-orange-50'}`}>{filter.label}</button>)}</div></div>
+                  <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'projects', label: 'DPWH projects' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
                 </div>
               )}
 
