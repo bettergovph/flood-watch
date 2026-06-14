@@ -29,7 +29,31 @@ type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'buildings
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
 type MobilePanel = 'map' | 'browse' | 'terrain' | 'simulate' | 'impact';
 
-type LocationPreset = { name: string; subtitle: string; center: [number, number]; zoom: number; national?: boolean };
+type LocationPreset = { name: string; subtitle: string; center: [number, number]; zoom: number; national?: boolean; projectQuery: string };
+type FloodControlProject = {
+  contractId: string;
+  description: string;
+  category: string;
+  componentCategories?: string | string[];
+  status?: string;
+  budget?: number;
+  amountPaid?: number;
+  progress?: number;
+  location?: { region?: string; province?: string; municipality?: string; barangay?: string };
+  contractor?: string;
+  startDate?: string;
+  completionDate?: string;
+  infraYear?: string | number;
+  programName?: string;
+  sourceOfFunds?: string;
+  isLive?: boolean;
+  livestreamUrl?: string | null;
+  latitude: number;
+  longitude: number;
+  reportCount?: number;
+  hasSatelliteImage?: boolean;
+};
+
 type InfrastructureProject = {
   id: number;
   tool: Tool;
@@ -61,12 +85,12 @@ const scenarios: Array<{ name: Scenario; sourceLayer?: string; depth: string; af
 ];
 
 const locations: LocationPreset[] = [
-  { name: 'Philippines', subtitle: 'National flood concentration view', center: [122.4, 12.65], zoom: 4.9, national: true },
-  { name: 'Naga City', subtitle: 'Bicol River Basin', center: [123.8854, 13.6218], zoom: 13.4 },
-  { name: 'Metro Manila', subtitle: 'Marikina / Pasig floodplain', center: [121.0437, 14.6507], zoom: 13.1 },
-  { name: 'Cagayan de Oro', subtitle: 'Cagayan River', center: [124.6319, 8.4542], zoom: 13.4 },
-  { name: 'Tacloban', subtitle: 'Leyte storm-surge zone', center: [125.0, 11.244], zoom: 13.4 },
-  { name: 'Iloilo City', subtitle: 'Panay urban coast', center: [122.5621, 10.7202], zoom: 13.4 },
+  { name: 'Philippines', subtitle: 'National flood concentration view', center: [122.4, 12.65], zoom: 4.9, national: true, projectQuery: '' },
+  { name: 'Naga City', subtitle: 'Bicol River Basin', center: [123.8854, 13.6218], zoom: 13.4, projectQuery: 'Bicol' },
+  { name: 'Metro Manila', subtitle: 'Marikina / Pasig floodplain', center: [121.0437, 14.6507], zoom: 13.1, projectQuery: 'Marikina Pasig Metro Manila' },
+  { name: 'Cagayan de Oro', subtitle: 'Cagayan River', center: [124.6319, 8.4542], zoom: 13.4, projectQuery: 'Cagayan de Oro' },
+  { name: 'Tacloban', subtitle: 'Leyte storm-surge zone', center: [125.0, 11.244], zoom: 13.4, projectQuery: 'Tacloban' },
+  { name: 'Iloilo City', subtitle: 'Panay urban coast', center: [122.5621, 10.7202], zoom: 13.4, projectQuery: 'Iloilo City' },
 ];
 
 const floodConcentration = {
@@ -107,6 +131,44 @@ function hazardColor(layer: string) {
 
 function fmtNumber(value: number) {
   return new Intl.NumberFormat('en-PH').format(Math.round(value));
+}
+
+function fmtPeso(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a';
+  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', maximumFractionDigits: 0 }).format(value);
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char] ?? char));
+}
+
+function projectLocation(project: FloodControlProject) {
+  return [project.location?.municipality, project.location?.province, project.location?.region].filter(Boolean).join(', ') || 'Unknown location';
+}
+
+function asProjectGeojson(projects: FloodControlProject[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: projects
+      .filter((project) => Number.isFinite(project.latitude) && Number.isFinite(project.longitude))
+      .map((project) => ({
+        type: 'Feature' as const,
+        properties: {
+          contractId: project.contractId,
+          description: project.description,
+          status: project.status ?? 'Unknown',
+          budget: project.budget ?? 0,
+          progress: project.progress ?? 0,
+          contractor: project.contractor ?? '',
+          programName: project.programName ?? '',
+          infraYear: project.infraYear ?? '',
+          location: projectLocation(project),
+          reportCount: project.reportCount ?? 0,
+          hasSatelliteImage: Boolean(project.hasSatelliteImage),
+        },
+        geometry: { type: 'Point' as const, coordinates: [project.longitude, project.latitude] },
+      })),
+  };
 }
 
 function circlePolygon(center: [number, number], radiusKm: number, points = 48) {
@@ -152,7 +214,9 @@ function MapPreview({
   terrainExaggeration,
   drawingTool,
   projects,
+  floodControlProjects,
   onPlaceProject,
+  onSelectFloodControlProject,
   mobileApp = false,
   fullScreen = false,
   navigationSeq = 0,
@@ -165,7 +229,9 @@ function MapPreview({
   terrainExaggeration: number;
   drawingTool: Tool | null;
   projects: InfrastructureProject[];
+  floodControlProjects: FloodControlProject[];
   onPlaceProject: (lngLat: [number, number]) => void;
+  onSelectFloodControlProject: (project: FloodControlProject) => void;
   mobileApp?: boolean;
   fullScreen?: boolean;
   navigationSeq?: number;
@@ -176,11 +242,15 @@ function MapPreview({
   const initialLocationRef = useRef(selectedLocation);
   const drawingToolRef = useRef(drawingTool);
   const onPlaceProjectRef = useRef(onPlaceProject);
+  const onSelectFloodControlProjectRef = useRef(onSelectFloodControlProject);
+  const floodControlProjectsRef = useRef(floodControlProjects);
 
   useEffect(() => {
     drawingToolRef.current = drawingTool;
     onPlaceProjectRef.current = onPlaceProject;
-  }, [drawingTool, onPlaceProject]);
+    onSelectFloodControlProjectRef.current = onSelectFloodControlProject;
+    floodControlProjectsRef.current = floodControlProjects;
+  }, [drawingTool, onPlaceProject, onSelectFloodControlProject, floodControlProjects]);
 
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
@@ -196,6 +266,7 @@ function MapPreview({
           floodConcentration: { type: 'geojson', data: floodConcentration },
           'terrain-dem': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', attribution: 'Terrain: AWS Open Data Terrarium DEM' },
           buildings: { type: 'vector', tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14, attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
+          floodControlProjects: { type: 'geojson', data: asProjectGeojson([]) },
           mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
         },
         layers: [
@@ -297,6 +368,8 @@ function MapPreview({
           paint: { 'fill-color': hazardColor(layer) as maplibregl.ExpressionSpecification, 'fill-opacity': 0.58, 'fill-outline-color': 'rgba(255,255,255,0.35)' },
         });
       });
+      map.addLayer({ id: 'flood-control-project-pins', type: 'circle', source: 'floodControlProjects', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 4, 12, 7, 15, 10], 'circle-color': '#f97316', 'circle-opacity': 0.9, 'circle-stroke-color': '#fff7ed', 'circle-stroke-width': 1.6 } });
+      map.addLayer({ id: 'flood-control-project-labels', type: 'symbol', source: 'floodControlProjects', minzoom: 10, layout: { 'text-field': ['get', 'contractId'], 'text-size': 10, 'text-offset': [0, 1.25], 'text-anchor': 'top', 'text-allow-overlap': false }, paint: { 'text-color': '#fed7aa', 'text-halo-color': '#431407', 'text-halo-width': 1.2 } });
       map.addLayer({ id: 'mitigation-fill', type: 'fill', source: 'mitigation', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#22c55e', 'fill-opacity': 0.28, 'fill-outline-color': '#bbf7d0' } });
       map.addLayer({ id: 'mitigation-line', type: 'line', source: 'mitigation', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': '#facc15', 'line-width': 5, 'line-dasharray': [2, 1] } });
       map.addLayer({ id: 'mitigation-point', type: 'circle', source: 'mitigation', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 10, 'circle-color': '#fb7185', 'circle-stroke-color': '#fff1f2', 'circle-stroke-width': 2 } });
@@ -307,9 +380,19 @@ function MapPreview({
         onPlaceProjectRef.current([event.lngLat.lng, event.lngLat.lat]);
         return;
       }
+      const projectFeature = map.queryRenderedFeatures(event.point, { layers: ['flood-control-project-pins'].filter((id) => map.getLayer(id)) })[0];
       const concentration = map.queryRenderedFeatures(event.point, { layers: ['flood-concentration-points'].filter((id) => map.getLayer(id)) })[0];
       const features = map.queryRenderedFeatures(event.point, { layers: sourceLayers.map((layer) => `hazard-${layer}`).filter((id) => map.getLayer(id)) });
       const top = features[0];
+      if (projectFeature?.properties) {
+        const props = projectFeature.properties as Record<string, unknown>;
+        const project = floodControlProjectsRef.current.find((item) => item.contractId === props.contractId);
+        if (project) onSelectFloodControlProjectRef.current(project);
+        const html = `<strong>${escapeHtml(props.contractId)}</strong><br/><span>${escapeHtml(props.description)}</span><br/><br/><strong>Budget:</strong> ${fmtPeso(Number(props.budget))}<br/><strong>Status:</strong> ${escapeHtml(props.status)} · ${Math.round(Number(props.progress) || 0)}%<br/><strong>Location:</strong> ${escapeHtml(props.location)}<br/><strong>Contractor:</strong> ${escapeHtml(props.contractor)}<br/><strong>Program:</strong> ${escapeHtml(props.programName)}<br/><strong>Reports:</strong> ${fmtNumber(Number(props.reportCount) || 0)} · Satellite: ${props.hasSatelliteImage ? 'yes' : 'no'}`;
+        popupRef.current?.remove();
+        popupRef.current = new maplibregl.Popup({ maxWidth: '360px' }).setLngLat(event.lngLat).setHTML(html).addTo(map);
+        return;
+      }
       const html = concentration
         ? `<strong>${concentration.properties?.name}</strong><br/>National flood concentration: ${Math.round((Number(concentration.properties?.intensity) || 0) * 100)}%<br/>${concentration.properties?.affected ?? ''}`
         : top
@@ -384,6 +467,11 @@ function MapPreview({
     source?.setData(asMitigationGeojson(projects));
   }, [projects]);
 
+  useEffect(() => {
+    const source = mapRef.current?.getSource('floodControlProjects') as maplibregl.GeoJSONSource | undefined;
+    source?.setData(asProjectGeojson(floodControlProjects));
+  }, [floodControlProjects]);
+
   return (
     <div className={`relative overflow-hidden bg-slate-950 shadow-glow ${mobileApp ? 'h-full rounded-none border-0' : fullScreen ? 'h-full min-h-0 rounded-none border-0' : 'h-[68svh] min-h-[440px] rounded-[1.35rem] border border-cyan-200/20 sm:h-[72svh] md:h-[660px] md:rounded-[2rem]'}`}>
       <div ref={ref} className={`absolute inset-0 ${drawingTool ? 'cursor-crosshair' : ''}`} />
@@ -399,7 +487,7 @@ function MapPreview({
         {!mobileApp && <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-300 sm:mt-3 sm:text-xs"><Database className="h-3.5 w-3.5" /> PMTiles range loading</div>}
       </div>
       {drawingTool && <div className={`absolute z-10 rounded-2xl border border-yellow-200/40 bg-yellow-300 p-3 text-center text-sm font-semibold text-slate-950 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
-      {!mobileApp && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-white/15 bg-slate-950/85 p-4 text-white backdrop-blur-xl sm:grid md:grid-cols-4">{['Click map for feature values', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'Draw mitigation projects'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-cyan-300" /> {layer}</div>)}</div>}
+      {!mobileApp && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-white/15 bg-slate-950/85 p-4 text-white backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-cyan-300" /> {layer}</div>)}</div>}
     </div>
   );
 }
@@ -421,6 +509,9 @@ export default function App() {
   const [terrainExaggeration, setTerrainExaggeration] = useState(2.2);
   const [drawingTool, setDrawingTool] = useState<Tool | null>(null);
   const [projects, setProjects] = useState<InfrastructureProject[]>([]);
+  const [floodControlProjects, setFloodControlProjects] = useState<FloodControlProject[]>([]);
+  const [selectedFloodControlProject, setSelectedFloodControlProject] = useState<FloodControlProject | null>(null);
+  const [projectSearchState, setProjectSearchState] = useState<{ loading: boolean; error: string | null; total: number }>({ loading: true, error: null, total: 0 });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('map');
   const [desktopView, setDesktopView] = useState<'landing' | 'terrain'>('landing');
   const [navigationSeq, setNavigationSeq] = useState(0);
@@ -430,9 +521,34 @@ export default function App() {
   const after = { affected: scenario.affected * (1 - totalBenefit), homes: scenario.homes * (1 - totalBenefit), roads: scenario.roads * (1 - totalBenefit * 0.8), assets: scenario.assets * (1 - totalBenefit * 0.9) };
   const toggleLayer = (layer: LayerKey) => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const jumpToLocation = (location: LocationPreset) => {
+    setProjectSearchState({ loading: true, error: null, total: 0 });
+    setSelectedFloodControlProject(null);
     setSelectedLocation({ ...location });
     setNavigationSeq((value) => value + 1);
   };
+  useEffect(() => {
+    const controller = new AbortController();
+    const q = selectedLocation.projectQuery;
+    fetch(`/api/flood-control-projects?q=${encodeURIComponent(q)}&limit=${selectedLocation.national ? 500 : 350}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Project search failed (${response.status})`);
+        return response.json();
+      })
+      .then((payload) => {
+        const result = payload.results?.[0];
+        const hits = (result?.hits ?? []) as FloodControlProject[];
+        const validHits = hits.filter((project) => Number.isFinite(project.latitude) && Number.isFinite(project.longitude));
+        setFloodControlProjects(validHits);
+        setProjectSearchState({ loading: false, error: null, total: result?.estimatedTotalHits ?? validHits.length });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setFloodControlProjects([]);
+        setProjectSearchState({ loading: false, error: error instanceof Error ? error.message : 'Project search failed', total: 0 });
+      });
+    return () => controller.abort();
+  }, [selectedLocation]);
+
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;
     setProjects((current) => [...current, makeProject(drawingTool, lngLat, current.length + 1)]);
@@ -462,7 +578,7 @@ export default function App() {
     { key: 'impact' as const, label: 'Impact', icon: BarChart3 },
   ];
 
-  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, onPlaceProject: placeProject, navigationSeq };
+  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
@@ -478,8 +594,23 @@ export default function App() {
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Scenario</div><div className="font-bold text-cyan-200">{scenario.name}</div></div>
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-cyan-200">{selectedLocation.name}</div></div>
+          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(floodControlProjects.length)} shown${projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
         </div>
       </div>
+
+      {selectedFloodControlProject && (
+        <div className="rounded-3xl border border-orange-200/20 bg-orange-950/30 p-5 backdrop-blur-2xl">
+          <div className="text-xs uppercase tracking-[0.2em] text-orange-200">Selected DPWH project</div>
+          <h3 className="mt-2 text-lg font-black text-white">{selectedFloodControlProject.contractId}</h3>
+          <p className="mt-2 line-clamp-4 text-sm leading-6 text-orange-50/85">{selectedFloodControlProject.description}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-xl bg-white/5 p-3"><div className="text-slate-400">Budget</div><div className="font-bold text-orange-200">{fmtPeso(selectedFloodControlProject.budget)}</div></div>
+            <div className="rounded-xl bg-white/5 p-3"><div className="text-slate-400">Progress</div><div className="font-bold text-orange-200">{Math.round(selectedFloodControlProject.progress ?? 0)}%</div></div>
+            <div className="col-span-2 rounded-xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-orange-100">{projectLocation(selectedFloodControlProject)}</div></div>
+            <div className="col-span-2 rounded-xl bg-white/5 p-3"><div className="text-slate-400">Contractor</div><div className="font-bold text-orange-100">{selectedFloodControlProject.contractor || 'n/a'}</div></div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
         <div className="mb-3 flex items-center gap-2 font-bold"><Clock3 className="h-4 w-4 text-cyan-300" /> Flood scenario</div>
@@ -536,6 +667,7 @@ export default function App() {
                 <div className="space-y-5">
                   <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
                   <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
+                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(floodControlProjects.length)} shown for {selectedLocation.name}</div>
                   <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
                 </div>
               )}
