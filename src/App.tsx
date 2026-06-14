@@ -187,6 +187,11 @@ function closestProjectQuery(center: [number, number], zoom: number) {
   return closest && closest.distance < (zoom >= 10 ? 1.2 : 2.5) ? closest.location.projectQuery : '';
 }
 
+function viewportBboxParam(bounds: MapViewport['bounds']) {
+  const [[west, south], [east, north]] = bounds;
+  return [west, south, east, north].map((value) => value.toFixed(4)).join(',');
+}
+
 function asProjectGeojson(projects: FloodControlProject[]) {
   return {
     type: 'FeatureCollection' as const,
@@ -585,7 +590,8 @@ export default function App() {
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName) ?? scenarios[4], [scenarioName]);
   const projectQuery = useMemo(() => closestProjectQuery(mapViewport.center, mapViewport.zoom), [mapViewport.center, mapViewport.zoom]);
-  const projectLimit = mapViewport.zoom < 7 ? 800 : mapViewport.zoom < 10 ? 650 : 450;
+  const projectLimit = mapViewport.zoom < 7 ? 1200 : mapViewport.zoom < 10 ? 900 : 450;
+  const projectBbox = useMemo(() => viewportBboxParam(mapViewport.bounds), [mapViewport.bounds]);
   const handleViewportChange = useCallback((viewport: MapViewport) => {
     setMapViewport((current) => {
       const centerDelta = Math.hypot(current.center[0] - viewport.center[0], current.center[1] - viewport.center[1]);
@@ -614,8 +620,9 @@ export default function App() {
     const timeout = window.setTimeout(() => {
       const q = projectQuery;
       const limit = projectLimit;
+      const params = new URLSearchParams({ q, limit: String(limit), zoom: mapViewport.zoom.toFixed(2), bbox: projectBbox });
       setProjectSearchState((current) => ({ ...current, loading: true, error: null, query: q }));
-      fetch(`/api/flood-control-projects?q=${encodeURIComponent(q)}&limit=${limit}`, { signal: controller.signal })
+      fetch(`/api/flood-control-projects?${params.toString()}`, { signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`Project search failed (${response.status})`);
           return response.json();
@@ -637,7 +644,7 @@ export default function App() {
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [projectQuery, projectLimit]);
+  }, [projectQuery, projectLimit, projectBbox, mapViewport.zoom]);
 
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;
