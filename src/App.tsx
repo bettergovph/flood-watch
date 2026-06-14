@@ -23,9 +23,9 @@ import {
   X,
 } from 'lucide-react';
 
-type Scenario = 'Current' | '5-Year Flood' | '25-Year Flood' | '50-Year Flood' | '100-Year Flood';
+type Scenario = 'Clear' | '5-Year Flood' | '25-Year Flood' | '50-Year Flood' | '100-Year Flood';
 type Tool = 'Flood Wall' | 'Retention Basin' | 'Diversion Channel' | 'Pump Station';
-type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow';
+type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'buildings' | 'houses';
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
 type MobilePanel = 'map' | 'browse' | 'terrain' | 'simulate' | 'impact';
 
@@ -53,7 +53,7 @@ const datasetUrl = '/datasets/noah_hazard_maps.pmtiles';
 const sourceLayers = ['flood_5yr', 'flood_25yr', 'flood_100yr', 'landslide', 'debris_flow', 'storm_surge_ssa1', 'storm_surge_ssa2', 'storm_surge_ssa3', 'storm_surge_ssa4'];
 
 const scenarios: Array<{ name: Scenario; sourceLayer?: string; depth: string; affected: number; homes: number; roads: number; assets: number; color: string }> = [
-  { name: 'Current', depth: '0.2 m', affected: 8400, homes: 2200, roads: 22, assets: 1.4, color: '#38bdf8' },
+  { name: 'Clear', depth: 'Vanilla map', affected: 0, homes: 0, roads: 0, assets: 0, color: '#94a3b8' },
   { name: '5-Year Flood', sourceLayer: 'flood_5yr', depth: '0.7 m', affected: 23100, homes: 7180, roads: 52, assets: 4.8, color: '#06b6d4' },
   { name: '25-Year Flood', sourceLayer: 'flood_25yr', depth: '1.4 m', affected: 58600, homes: 18150, roads: 104, assets: 9.7, color: '#0ea5e9' },
   { name: '50-Year Flood', sourceLayer: 'flood_25yr', depth: '2.1 m', affected: 91200, homes: 28740, roads: 143, assets: 13.9, color: '#2563eb' },
@@ -62,11 +62,11 @@ const scenarios: Array<{ name: Scenario; sourceLayer?: string; depth: string; af
 
 const locations: LocationPreset[] = [
   { name: 'Philippines', subtitle: 'National flood concentration view', center: [122.4, 12.65], zoom: 4.9, national: true },
-  { name: 'Naga City', subtitle: 'Bicol River Basin', center: [123.8854, 13.6218], zoom: 11.2 },
-  { name: 'Metro Manila', subtitle: 'Marikina / Pasig floodplain', center: [121.0437, 14.6507], zoom: 10.5 },
-  { name: 'Cagayan de Oro', subtitle: 'Cagayan River', center: [124.6319, 8.4542], zoom: 11 },
-  { name: 'Tacloban', subtitle: 'Leyte storm-surge zone', center: [125.0, 11.244], zoom: 11 },
-  { name: 'Iloilo City', subtitle: 'Panay urban coast', center: [122.5621, 10.7202], zoom: 11 },
+  { name: 'Naga City', subtitle: 'Bicol River Basin', center: [123.8854, 13.6218], zoom: 13.4 },
+  { name: 'Metro Manila', subtitle: 'Marikina / Pasig floodplain', center: [121.0437, 14.6507], zoom: 13.1 },
+  { name: 'Cagayan de Oro', subtitle: 'Cagayan River', center: [124.6319, 8.4542], zoom: 13.4 },
+  { name: 'Tacloban', subtitle: 'Leyte storm-surge zone', center: [125.0, 11.244], zoom: 13.4 },
+  { name: 'Iloilo City', subtitle: 'Panay urban coast', center: [122.5621, 10.7202], zoom: 13.4 },
 ];
 
 const floodConcentration = {
@@ -155,6 +155,7 @@ function MapPreview({
   onPlaceProject,
   mobileApp = false,
   fullScreen = false,
+  navigationSeq = 0,
 }: {
   scenario: (typeof scenarios)[number];
   opacity: number;
@@ -167,6 +168,7 @@ function MapPreview({
   onPlaceProject: (lngLat: [number, number]) => void;
   mobileApp?: boolean;
   fullScreen?: boolean;
+  navigationSeq?: number;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -193,6 +195,7 @@ function MapPreview({
           noah: { type: 'vector', url: `pmtiles://${window.location.origin}${datasetUrl}`, attribution: 'Project NOAH / BetterGov.ph' },
           floodConcentration: { type: 'geojson', data: floodConcentration },
           'terrain-dem': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', attribution: 'Terrain: AWS Open Data Terrarium DEM' },
+          buildings: { type: 'vector', tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14, attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
           mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
         },
         layers: [
@@ -256,6 +259,35 @@ function MapPreview({
           'text-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.72, 7.2, 0],
         },
       });
+      map.addLayer({
+        id: 'building-extrusions',
+        type: 'fill-extrusion',
+        source: 'buildings',
+        'source-layer': 'building',
+        minzoom: 12,
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-extrusion-color': '#dbeafe',
+          'fill-extrusion-opacity': 0.52,
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, ['coalesce', ['get', 'render_height'], ['get', 'height'], 10]],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+        },
+      });
+      map.addLayer({
+        id: 'house-extrusions',
+        type: 'fill-extrusion',
+        source: 'buildings',
+        'source-layer': 'building',
+        minzoom: 14,
+        filter: ['any', ['==', ['get', 'class'], 'house'], ['==', ['get', 'class'], 'residential'], ['==', ['get', 'type'], 'house'], ['==', ['get', 'type'], 'residential'], ['==', ['get', 'building'], 'house'], ['==', ['get', 'building'], 'residential']],
+        layout: { visibility: 'none' },
+        paint: {
+          'fill-extrusion-color': '#fef3c7',
+          'fill-extrusion-opacity': 0.68,
+          'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 16, ['coalesce', ['get', 'render_height'], ['get', 'height'], 7]],
+          'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+        },
+      });
       sourceLayers.forEach((layer) => {
         map.addLayer({
           id: `hazard-${layer}`,
@@ -295,16 +327,31 @@ function MapPreview({
   }, []);
 
   useEffect(() => {
-    mapRef.current?.flyTo({ center: selectedLocation.center, zoom: selectedLocation.zoom, pitch: selectedLocation.national ? 0 : terrainEnabled ? 72 : 44, bearing: selectedLocation.national ? 0 : -18, duration: 1000 });
-  }, [selectedLocation, terrainEnabled]);
+    const map = mapRef.current;
+    if (!map) return;
+    const camera = { center: selectedLocation.center, zoom: selectedLocation.zoom, pitch: selectedLocation.national ? 0 : terrainEnabled ? 72 : 44, bearing: selectedLocation.national ? 0 : -18, duration: 1000 };
+    map.resize();
+    map.stop();
+    map.flyTo(camera);
+    const retry = window.setTimeout(() => {
+      map.resize();
+      map.flyTo({ ...camera, duration: 450 });
+    }, 80);
+    return () => window.clearTimeout(retry);
+  }, [selectedLocation, terrainEnabled, navigationSeq]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const applyVisibility = () => {
+      ['building-extrusions', 'house-extrusions'].forEach((id) => {
+        if (!map.getLayer(id)) return;
+        const visible = id === 'building-extrusions' ? visibleLayers.buildings : visibleLayers.houses;
+        map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+      });
       ['flood-concentration-heat', 'flood-concentration-points', 'flood-concentration-labels'].forEach((id) => {
         if (!map.getLayer(id)) return;
-        map.setLayoutProperty(id, 'visibility', visibleLayers.flood ? 'visible' : 'none');
+        map.setLayoutProperty(id, 'visibility', visibleLayers.flood && Boolean(scenario.sourceLayer) ? 'visible' : 'none');
       });
       sourceLayers.forEach((layer) => {
         const id = `hazard-${layer}`;
@@ -358,7 +405,7 @@ function MapPreview({
 }
 
 function ScenarioControls({ scenarioName, setScenarioName }: { scenarioName: Scenario; setScenarioName: (value: Scenario) => void }) {
-  return <div className="grid gap-2 sm:grid-cols-5">{scenarios.map((item) => <button key={item.name} onClick={() => setScenarioName(item.name)} className={`rounded-2xl border p-3 text-left transition ${scenarioName === item.name ? 'border-cyan-300 bg-cyan-300/15' : 'border-white/10 bg-slate-900/60 hover:bg-white/10'}`}><div className="text-sm font-semibold">{item.name}</div><div className="mt-2 text-2xl font-black" style={{ color: item.color }}>{item.depth}</div><div className="mt-1 text-xs text-slate-400">{fmtNumber(item.affected)} affected</div></button>)}</div>;
+  return <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 xl:grid-cols-2">{scenarios.map((item) => <button key={item.name} onClick={() => setScenarioName(item.name)} className={`min-w-0 rounded-2xl border p-3 text-left transition ${scenarioName === item.name ? 'border-cyan-300 bg-cyan-300/15' : 'border-white/10 bg-slate-900/60 hover:bg-white/10'}`}><div className="truncate text-sm font-semibold">{item.name}</div><div className="mt-1 text-base font-black leading-tight" style={{ color: item.color }}>{item.depth}</div></button>)}</div>;
 }
 
 function AppButton({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick: () => void }) {
@@ -369,18 +416,23 @@ export default function App() {
   const [scenarioName, setScenarioName] = useState<Scenario>('100-Year Flood');
   const [opacity, setOpacity] = useState(0.58);
   const [selectedLocation, setSelectedLocation] = useState(locations[0]);
-  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false });
+  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false, buildings: false, houses: false });
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [terrainExaggeration, setTerrainExaggeration] = useState(2.2);
   const [drawingTool, setDrawingTool] = useState<Tool | null>(null);
   const [projects, setProjects] = useState<InfrastructureProject[]>([]);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('map');
   const [desktopView, setDesktopView] = useState<'landing' | 'terrain'>('landing');
+  const [navigationSeq, setNavigationSeq] = useState(0);
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName) ?? scenarios[4], [scenarioName]);
   const totalBenefit = Math.min(0.72, projects.reduce((sum, project) => sum + project.benefitScore, 0));
   const after = { affected: scenario.affected * (1 - totalBenefit), homes: scenario.homes * (1 - totalBenefit), roads: scenario.roads * (1 - totalBenefit * 0.8), assets: scenario.assets * (1 - totalBenefit * 0.9) };
   const toggleLayer = (layer: LayerKey) => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
+  const jumpToLocation = (location: LocationPreset) => {
+    setSelectedLocation({ ...location });
+    setNavigationSeq((value) => value + 1);
+  };
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;
     setProjects((current) => [...current, makeProject(drawingTool, lngLat, current.length + 1)]);
@@ -410,7 +462,7 @@ export default function App() {
     { key: 'impact' as const, label: 'Impact', icon: BarChart3 },
   ];
 
-  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, onPlaceProject: placeProject };
+  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, onPlaceProject: placeProject, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
@@ -431,12 +483,12 @@ export default function App() {
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
         <div className="mb-3 flex items-center gap-2 font-bold"><Clock3 className="h-4 w-4 text-cyan-300" /> Flood scenario</div>
-        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2"><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
+        <div className="mt-3"><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
         <div className="mb-3 flex items-center gap-2 font-bold"><MapPinned className="h-4 w-4 text-cyan-300" /> Jump to area</div>
-        <div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => setSelectedLocation(location)}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div>
+        <div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => jumpToLocation(location)}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div>
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
@@ -447,7 +499,7 @@ export default function App() {
 
       <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
         <div className="mb-3 flex items-center gap-2 font-bold"><Eye className="h-4 w-4 text-cyan-300" /> Layers</div>
-        <div className="space-y-2">{([{ key: 'flood', label: 'Flood scenario + national concentration' }, { key: 'landslide', label: 'Landslide hazards' }, { key: 'stormSurge', label: 'Storm surge hazards' }, { key: 'debrisFlow', label: 'Debris-flow hazards' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div>
+        <div className="space-y-2">{([{ key: 'flood', label: 'Flood scenario + national concentration' }, { key: 'landslide', label: 'Landslide hazards' }, { key: 'stormSurge', label: 'Storm surge hazards' }, { key: 'debrisFlow', label: 'Debris-flow hazards' }, { key: 'buildings', label: '3D buildings' }, { key: 'houses', label: 'Houses / residential footprints' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div>
         <label className="mt-4 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-2 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
       </div>
 
@@ -482,9 +534,9 @@ export default function App() {
             <div className="max-h-[calc(58svh-4.5rem)] overflow-y-auto p-4">
               {mobilePanel === 'browse' && (
                 <div className="space-y-5">
-                  <div><h3 className="mb-2 font-semibold">Flood scenario</h3><div className="grid grid-cols-2 gap-2"><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div></div>
-                  <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { setSelectedLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
-                  <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
+                  <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
+                  <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
+                  <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
                 </div>
               )}
 
