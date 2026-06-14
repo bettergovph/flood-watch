@@ -148,6 +148,40 @@ function projectLocation(project: FloodControlProject) {
   return [project.location?.municipality, project.location?.province, project.location?.region].filter(Boolean).join(', ') || 'Unknown location';
 }
 
+function fmtDate(value?: string) {
+  if (!value) return 'n/a';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+}
+
+function projectPopoverHtml(project: FloodControlProject) {
+  const progress = typeof project.progress === 'number' && Number.isFinite(project.progress) ? Math.round(project.progress) : 0;
+  const location = [project.location?.barangay, project.location?.municipality, project.location?.province, project.location?.region].filter(Boolean).join(', ') || 'Unknown location';
+
+  return `
+    <div class="floodlens-project-popup">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;color:#fdba74">DPWH flood-control project</div>
+      <div style="margin-top:4px;font-size:16px;font-weight:900;color:#fff7ed">${escapeHtml(project.contractId)}</div>
+      <div style="margin-top:8px;max-height:96px;overflow-y:auto;font-size:13px;line-height:1.45;color:#e2e8f0">${escapeHtml(project.description || 'No description available')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12px">
+        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Budget</div><div style="font-weight:800;color:#fed7aa">${escapeHtml(fmtPeso(project.budget))}</div></div>
+        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Paid</div><div style="font-weight:800;color:#fed7aa">${escapeHtml(fmtPeso(project.amountPaid))}</div></div>
+        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Status</div><div style="font-weight:800;color:#ffedd5">${escapeHtml(project.status || 'Unknown')}</div></div>
+        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Progress</div><div style="font-weight:800;color:#ffedd5">${progress}%</div></div>
+      </div>
+      <div style="margin-top:12px;font-size:12px;line-height:1.55;color:#e2e8f0">
+        <div><strong style="color:#94a3b8">Location:</strong> ${escapeHtml(location)}</div>
+        <div><strong style="color:#94a3b8">Contractor:</strong> ${escapeHtml(project.contractor || 'n/a')}</div>
+        <div><strong style="color:#94a3b8">Program:</strong> ${escapeHtml(project.programName || 'n/a')}</div>
+        <div><strong style="color:#94a3b8">Source:</strong> ${escapeHtml(project.sourceOfFunds || 'n/a')} · <strong style="color:#94a3b8">Year:</strong> ${escapeHtml(project.infraYear || 'n/a')}</div>
+        <div><strong style="color:#94a3b8">Timeline:</strong> ${escapeHtml(fmtDate(project.startDate))} → ${escapeHtml(fmtDate(project.completionDate))}</div>
+        <div><strong style="color:#94a3b8">Reports:</strong> ${fmtNumber(project.reportCount ?? 0)} · <strong style="color:#94a3b8">Satellite:</strong> ${project.hasSatelliteImage ? 'yes' : 'no'}</div>
+      </div>
+    </div>
+  `;
+}
+
 const projectFilters: Array<{ key: ProjectFilter; label: string; description: string }> = [
   { key: 'all', label: 'All', description: 'Every returned DPWH flood-control project' },
   { key: 'ongoing', label: 'Ongoing', description: 'Projects not marked completed' },
@@ -444,26 +478,27 @@ function MapPreview({
         onPlaceProjectRef.current([event.lngLat.lng, event.lngLat.lat]);
         return;
       }
+
       const projectFeature = map.queryRenderedFeatures(event.point, { layers: ['flood-control-project-pins'].filter((id) => map.getLayer(id)) })[0];
-      const concentration = map.queryRenderedFeatures(event.point, { layers: ['flood-concentration-points'].filter((id) => map.getLayer(id)) })[0];
-      const features = map.queryRenderedFeatures(event.point, { layers: sourceLayers.map((layer) => `hazard-${layer}`).filter((id) => map.getLayer(id)) });
-      const top = features[0];
-      if (projectFeature?.properties) {
-        const props = projectFeature.properties as Record<string, unknown>;
-        const project = floodControlProjectsRef.current.find((item) => item.contractId === props.contractId);
-        if (project) onSelectFloodControlProjectRef.current(project);
-        const html = `<strong>${escapeHtml(props.contractId)}</strong><br/><span>${escapeHtml(props.description)}</span><br/><br/><strong>Budget:</strong> ${fmtPeso(Number(props.budget))}<br/><strong>Status:</strong> ${escapeHtml(props.status)} · ${Math.round(Number(props.progress) || 0)}%<br/><strong>Location:</strong> ${escapeHtml(props.location)}<br/><strong>Contractor:</strong> ${escapeHtml(props.contractor)}<br/><strong>Program:</strong> ${escapeHtml(props.programName)}<br/><strong>Reports:</strong> ${fmtNumber(Number(props.reportCount) || 0)} · Satellite: ${props.hasSatelliteImage ? 'yes' : 'no'}`;
+      if (!projectFeature?.properties) {
         popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ maxWidth: '360px' }).setLngLat(event.lngLat).setHTML(html).addTo(map);
         return;
       }
-      const html = concentration
-        ? `<strong>${concentration.properties?.name}</strong><br/>National flood concentration: ${Math.round((Number(concentration.properties?.intensity) || 0) * 100)}%<br/>${concentration.properties?.affected ?? ''}`
-        : top
-          ? `<strong>${top.sourceLayer}</strong><br/>Hazard value: ${top.properties?.Var ?? top.properties?.HAZ ?? 'n/a'}<br/>Lng/Lat: ${event.lngLat.lng.toFixed(5)}, ${event.lngLat.lat.toFixed(5)}`
-          : `<strong>No NOAH hazard feature here</strong><br/>Open Simulate to place a project.<br/>Lng/Lat: ${event.lngLat.lng.toFixed(5)}, ${event.lngLat.lat.toFixed(5)}`;
+
+      const props = projectFeature.properties as Record<string, unknown>;
+      const contractId = String(props.contractId ?? '');
+      const project = floodControlProjectsRef.current.find((item) => item.contractId === contractId);
+      if (!project) {
+        popupRef.current?.remove();
+        return;
+      }
+
+      onSelectFloodControlProjectRef.current(project);
       popupRef.current?.remove();
-      popupRef.current = new maplibregl.Popup().setLngLat(event.lngLat).setHTML(html).addTo(map);
+      popupRef.current = new maplibregl.Popup({
+        maxWidth: '420px',
+        className: 'floodlens-project-popup-shell',
+      }).setLngLat(event.lngLat).setHTML(projectPopoverHtml(project)).addTo(map);
     });
 
     return () => {

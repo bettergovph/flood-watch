@@ -19,6 +19,17 @@ code, .font-mono { overflow-wrap: anywhere; }
 .maplibregl-ctrl-attrib { font-size: 10px; }
 .maplibregl-canvas { touch-action: pan-x pan-y; }
 .maplibregl-ctrl-top-right { top: 0.75rem; right: 0.75rem; }
+.floodlens-project-popup-shell .maplibregl-popup-content {
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 22px 50px rgba(15, 23, 42, 0.45);
+  color: #f8fafc;
+  padding: 1rem;
+  backdrop-filter: blur(18px);
+}
+.floodlens-project-popup-shell .maplibregl-popup-tip { border-top-color: rgba(15, 23, 42, 0.96); border-bottom-color: rgba(15, 23, 42, 0.96); }
+.floodlens-project-popup-shell .maplibregl-popup-close-button { color: #fed7aa; font-size: 1.25rem; padding: 0.25rem 0.55rem; }
 
 @media (max-width: 767px) {
   .maplibregl-ctrl-top-right {
