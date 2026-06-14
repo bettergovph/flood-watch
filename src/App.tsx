@@ -589,7 +589,11 @@ export default function App() {
   const [mapViewport, setMapViewport] = useState<MapViewport>({ center: locations[0].center, zoom: locations[0].zoom, bounds: [[116, 4], [127, 21]] });
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName) ?? scenarios[4], [scenarioName]);
-  const projectQuery = useMemo(() => closestProjectQuery(mapViewport.center, mapViewport.zoom), [mapViewport.center, mapViewport.zoom]);
+  // PostGIS is now the source of truth for project lookup, so viewport movement
+  // should be driven by bbox only. Applying a location text query here can hide
+  // valid pins inside the current bounds (for example Naga projects that do not
+  // contain the word “Bicol” in searchable fields).
+  const projectQuery = '';
   const projectLimit = mapViewport.zoom < 7 ? 1200 : mapViewport.zoom < 10 ? 900 : 450;
   const projectBbox = useMemo(() => viewportBboxParam(mapViewport.bounds), [mapViewport.bounds]);
   const handleViewportChange = useCallback((viewport: MapViewport) => {
