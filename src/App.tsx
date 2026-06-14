@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import {
@@ -29,6 +29,7 @@ type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'projects'
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
 type MobilePanel = 'map' | 'browse' | 'terrain' | 'simulate' | 'impact';
 type ProjectFilter = 'all' | 'ongoing' | 'completed' | 'withReports' | 'withSatellite' | 'largeBudget';
+type MapViewport = { center: [number, number]; zoom: number; bounds: [[number, number], [number, number]] };
 
 type LocationPreset = { name: string; subtitle: string; center: [number, number]; zoom: number; national?: boolean; projectQuery: string };
 type FloodControlProject = {
@@ -165,6 +166,27 @@ function filterFloodControlProjects(projects: FloodControlProject[], filter: Pro
   return projects.filter((project) => (project.budget ?? 0) >= 100_000_000);
 }
 
+function projectWithinBounds(project: FloodControlProject, bounds: MapViewport['bounds'], paddingRatio = 0.12) {
+  const [[west, south], [east, north]] = bounds;
+  const lngPad = Math.max(0.08, (east - west) * paddingRatio);
+  const latPad = Math.max(0.08, (north - south) * paddingRatio);
+  return project.longitude >= west - lngPad && project.longitude <= east + lngPad && project.latitude >= south - latPad && project.latitude <= north + latPad;
+}
+
+function closestProjectQuery(center: [number, number], zoom: number) {
+  if (zoom < 6) return '';
+  const [lng, lat] = center;
+  const closest = locations
+    .filter((location) => !location.national)
+    .map((location) => {
+      const [locLng, locLat] = location.center;
+      const distance = Math.hypot((locLng - lng) * Math.cos((lat * Math.PI) / 180), locLat - lat);
+      return { location, distance };
+    })
+    .sort((a, b) => a.distance - b.distance)[0];
+  return closest && closest.distance < (zoom >= 10 ? 1.2 : 2.5) ? closest.location.projectQuery : '';
+}
+
 function asProjectGeojson(projects: FloodControlProject[]) {
   return {
     type: 'FeatureCollection' as const,
@@ -236,6 +258,7 @@ function MapPreview({
   floodControlProjects,
   onPlaceProject,
   onSelectFloodControlProject,
+  onViewportChange,
   mobileApp = false,
   fullScreen = false,
   navigationSeq = 0,
@@ -251,6 +274,7 @@ function MapPreview({
   floodControlProjects: FloodControlProject[];
   onPlaceProject: (lngLat: [number, number]) => void;
   onSelectFloodControlProject: (project: FloodControlProject) => void;
+  onViewportChange: (viewport: MapViewport) => void;
   mobileApp?: boolean;
   fullScreen?: boolean;
   navigationSeq?: number;
@@ -262,14 +286,16 @@ function MapPreview({
   const drawingToolRef = useRef(drawingTool);
   const onPlaceProjectRef = useRef(onPlaceProject);
   const onSelectFloodControlProjectRef = useRef(onSelectFloodControlProject);
+  const onViewportChangeRef = useRef(onViewportChange);
   const floodControlProjectsRef = useRef(floodControlProjects);
 
   useEffect(() => {
     drawingToolRef.current = drawingTool;
     onPlaceProjectRef.current = onPlaceProject;
     onSelectFloodControlProjectRef.current = onSelectFloodControlProject;
+    onViewportChangeRef.current = onViewportChange;
     floodControlProjectsRef.current = floodControlProjects;
-  }, [drawingTool, onPlaceProject, onSelectFloodControlProject, floodControlProjects]);
+  }, [drawingTool, onPlaceProject, onSelectFloodControlProject, onViewportChange, floodControlProjects]);
 
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
@@ -395,6 +421,19 @@ function MapPreview({
       map.addLayer({ id: 'mitigation-point', type: 'circle', source: 'mitigation', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 10, 'circle-color': '#fb7185', 'circle-stroke-color': '#fff1f2', 'circle-stroke-width': 2 } });
     });
 
+    const emitViewport = () => {
+      const center = map.getCenter();
+      const bounds = map.getBounds();
+      onViewportChangeRef.current({
+        center: [center.lng, center.lat],
+        zoom: map.getZoom(),
+        bounds: [[bounds.getWest(), bounds.getSouth()], [bounds.getEast(), bounds.getNorth()]],
+      });
+    };
+    map.once('idle', emitViewport);
+    map.on('moveend', emitViewport);
+    map.on('zoomend', emitViewport);
+
     map.on('click', (event) => {
       if (drawingToolRef.current) {
         onPlaceProjectRef.current([event.lngLat.lng, event.lngLat.lat]);
@@ -424,6 +463,8 @@ function MapPreview({
 
     return () => {
       popupRef.current?.remove();
+      map.off('moveend', emitViewport);
+      map.off('zoomend', emitViewport);
       map.remove();
       mapRef.current = null;
     };
@@ -536,18 +577,33 @@ export default function App() {
   const [floodControlProjects, setFloodControlProjects] = useState<FloodControlProject[]>([]);
   const [selectedFloodControlProject, setSelectedFloodControlProject] = useState<FloodControlProject | null>(null);
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
-  const [projectSearchState, setProjectSearchState] = useState<{ loading: boolean; error: string | null; total: number }>({ loading: true, error: null, total: 0 });
+  const [projectSearchState, setProjectSearchState] = useState<{ loading: boolean; error: string | null; total: number; query: string }>({ loading: true, error: null, total: 0, query: '' });
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('map');
   const [desktopView, setDesktopView] = useState<'landing' | 'terrain'>(() => (new URLSearchParams(window.location.search).get('v') === 'project' ? 'terrain' : 'landing'));
   const [navigationSeq, setNavigationSeq] = useState(0);
+  const [mapViewport, setMapViewport] = useState<MapViewport>({ center: locations[0].center, zoom: locations[0].zoom, bounds: [[116, 4], [127, 21]] });
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName) ?? scenarios[4], [scenarioName]);
+  const projectQuery = useMemo(() => closestProjectQuery(mapViewport.center, mapViewport.zoom), [mapViewport.center, mapViewport.zoom]);
+  const projectLimit = mapViewport.zoom < 7 ? 800 : mapViewport.zoom < 10 ? 650 : 450;
+  const handleViewportChange = useCallback((viewport: MapViewport) => {
+    setMapViewport((current) => {
+      const centerDelta = Math.hypot(current.center[0] - viewport.center[0], current.center[1] - viewport.center[1]);
+      const zoomDelta = Math.abs(current.zoom - viewport.zoom);
+      if (centerDelta < 0.01 && zoomDelta < 0.05) return current;
+      return viewport;
+    });
+  }, []);
   const totalBenefit = Math.min(0.72, projects.reduce((sum, project) => sum + project.benefitScore, 0));
   const after = { affected: scenario.affected * (1 - totalBenefit), homes: scenario.homes * (1 - totalBenefit), roads: scenario.roads * (1 - totalBenefit * 0.8), assets: scenario.assets * (1 - totalBenefit * 0.9) };
-  const filteredFloodControlProjects = useMemo(() => filterFloodControlProjects(floodControlProjects, projectFilter), [floodControlProjects, projectFilter]);
+  const filteredFloodControlProjects = useMemo(() => {
+    const filtered = filterFloodControlProjects(floodControlProjects, projectFilter);
+    if (mapViewport.zoom < 7) return filtered;
+    return filtered.filter((project) => projectWithinBounds(project, mapViewport.bounds));
+  }, [floodControlProjects, projectFilter, mapViewport]);
   const toggleLayer = (layer: LayerKey) => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const jumpToLocation = (location: LocationPreset) => {
-    setProjectSearchState({ loading: true, error: null, total: 0 });
+    setProjectSearchState((current) => ({ ...current, loading: true, error: null, total: 0 }));
     setSelectedFloodControlProject(null);
     setProjectFilter('all');
     setSelectedLocation({ ...location });
@@ -555,26 +611,33 @@ export default function App() {
   };
   useEffect(() => {
     const controller = new AbortController();
-    const q = selectedLocation.projectQuery;
-    fetch(`/api/flood-control-projects?q=${encodeURIComponent(q)}&limit=${selectedLocation.national ? 500 : 350}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Project search failed (${response.status})`);
-        return response.json();
-      })
-      .then((payload) => {
-        const result = payload.results?.[0];
-        const hits = (result?.hits ?? []) as FloodControlProject[];
-        const validHits = hits.filter((project) => Number.isFinite(project.latitude) && Number.isFinite(project.longitude));
-        setFloodControlProjects(validHits);
-        setProjectSearchState({ loading: false, error: null, total: result?.estimatedTotalHits ?? validHits.length });
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        setFloodControlProjects([]);
-        setProjectSearchState({ loading: false, error: error instanceof Error ? error.message : 'Project search failed', total: 0 });
-      });
-    return () => controller.abort();
-  }, [selectedLocation]);
+    const timeout = window.setTimeout(() => {
+      const q = projectQuery;
+      const limit = projectLimit;
+      setProjectSearchState((current) => ({ ...current, loading: true, error: null, query: q }));
+      fetch(`/api/flood-control-projects?q=${encodeURIComponent(q)}&limit=${limit}`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Project search failed (${response.status})`);
+          return response.json();
+        })
+        .then((payload) => {
+          const result = payload.results?.[0];
+          const hits = (result?.hits ?? []) as FloodControlProject[];
+          const validHits = hits.filter((project) => Number.isFinite(project.latitude) && Number.isFinite(project.longitude));
+          setFloodControlProjects(validHits);
+          setProjectSearchState({ loading: false, error: null, total: result?.estimatedTotalHits ?? validHits.length, query: q });
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setFloodControlProjects([]);
+          setProjectSearchState({ loading: false, error: error instanceof Error ? error.message : 'Project search failed', total: 0, query: q });
+        });
+    }, 220);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [projectQuery, projectLimit]);
 
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;
@@ -605,7 +668,7 @@ export default function App() {
     { key: 'impact' as const, label: 'Impact', icon: BarChart3 },
   ];
 
-  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: filteredFloodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, navigationSeq };
+  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: filteredFloodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, onViewportChange: handleViewportChange, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
@@ -621,7 +684,7 @@ export default function App() {
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Scenario</div><div className="font-bold text-cyan-200">{scenario.name}</div></div>
           <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-cyan-200">{selectedLocation.name}</div></div>
-          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} shown${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
+          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} in view${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div><div className="mt-1 text-xs text-orange-100/70">Auto-updates as you pan/zoom{projectSearchState.query ? ` · query: ${projectSearchState.query}` : ''}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
         </div>
       </div>
 
@@ -699,7 +762,7 @@ export default function App() {
                 <div className="space-y-5">
                   <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
                   <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
-                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} shown for {selectedLocation.name}</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-orange-300 text-slate-950' : 'bg-white/10 text-orange-50'}`}>{filter.label}</button>)}</div></div>
+                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} in current view</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-orange-300 text-slate-950' : 'bg-white/10 text-orange-50'}`}>{filter.label}</button>)}</div></div>
                   <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'projects', label: 'DPWH projects' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
                 </div>
               )}
