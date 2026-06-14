@@ -5,3 +5,4 @@ dist
 .DS_Store
 *.local
 data/
+public/datasets/noah_hazard_maps.pmtiles
