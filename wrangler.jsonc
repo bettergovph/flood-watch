@@ -16,6 +16,12 @@
       "custom_domain": true
     }
   ],
+  "r2_buckets": [
+    {
+      "bucket_name": "flood-watch",
+      "binding": "NOAH_DATASETS"
+    }
+  ],
   "secrets": {
     "required": ["DATABASE_URL"]
   }
