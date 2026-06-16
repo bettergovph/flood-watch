@@ -1,10 +1,10 @@
-# FloodLens PH
+# Flood Watch
 
 Interactive Flood Simulation & Infrastructure Planning Platform bootstrapped with **Vite + React + TypeScript + Tailwind CSS**.
 
 ## Implemented in this scaffold
 
-- PRD-driven landing/dashboard shell for FloodLens PH
+- PRD-driven landing/dashboard shell for Flood Watch
 - MapLibre map preview centered on Naga / Bicol with flood-depth visual overlays
 - Scenario controls for Current, 5-year, 25-year, 50-year, and 100-year floods
 - Infrastructure simulation cards for flood walls, retention basins, diversion channels, and pump stations
@@ -34,7 +34,7 @@ curl -L -o data/noah/noah_hazard_maps.pmtiles \
 
 ## DPWH project mirror / PostGIS seed
 
-FloodLens mirrors the BetterGov DPWH project API into PostGIS for reliable latitude/longitude and bounding-box lookups. The downloaded project dump is intentionally **not committed**; local seed artifacts are written under ignored `data/dpwh/`.
+Flood Watch mirrors the BetterGov DPWH project API into PostGIS for reliable latitude/longitude and bounding-box lookups. The downloaded project dump is intentionally **not committed**; local seed artifacts are written under ignored `data/dpwh/`.
 
 ### Local seed
 

@@ -52,7 +52,7 @@ def fetch_json(url: str, attempts: int = 5) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "FloodLens-PH-PostGIS-sync/1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Flood-Watch-PostGIS-sync/1.0"})
             with urllib.request.urlopen(req, timeout=90) as response:
                 return json.load(response)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:

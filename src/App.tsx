@@ -586,7 +586,7 @@ function MapPreview({
       <div className={`pointer-events-none absolute rounded-2xl border border-gray-200 bg-white/85 text-gray-900 backdrop-blur-xl ${mobileApp ? 'left-4 right-4 top-[max(1rem,env(safe-area-inset-top))] p-3' : 'left-3 right-3 top-3 p-3 sm:left-5 sm:right-auto sm:top-5 sm:max-w-sm sm:p-4'}`}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-primary sm:text-sm sm:tracking-[0.24em]"><Waves className="h-4 w-4" /> FloodLens PH</div>
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-primary sm:text-sm sm:tracking-[0.24em]"><Waves className="h-4 w-4" /> Flood Watch by BetterGov.ph</div>
             <div className="mt-1 text-lg font-semibold sm:text-2xl">{scenario.name}</div>
             <div className="mt-0.5 text-xs text-gray-600 sm:text-sm">{selectedLocation.name} · {terrainEnabled ? `${terrainExaggeration.toFixed(1)}× 3D` : '2D view'}</div>
           </div>
@@ -811,15 +811,15 @@ export default function App() {
           <div className="relative isolate min-h-screen overflow-hidden px-6 py-8 lg:px-10">
             <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_48%,#eef4ff_100%)]" />
             <nav className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-gray-200 bg-gray-50 px-5 py-3 backdrop-blur-xl">
-              <div className="flex items-center gap-3"><img src="/bettergov-logo-icon.png" alt="BetterGov" className="h-10 w-10 rounded-full" /><div><div className="font-semibold">FloodLens PH</div><div className="text-xs text-blue-700/70">BetterGov planning platform</div></div></div>
+              <div className="flex items-center gap-3"><img src="/bettergov-logo-icon.png" alt="BetterGov" className="h-10 w-10 rounded-full" /><div><div className="font-semibold">Flood Watch</div><div className="text-xs text-blue-700/70">by BetterGov.ph</div></div></div>
               <div className="flex items-center gap-3 text-sm"><button onClick={() => setDesktopView('landing')} className="rounded-full px-4 py-2 text-gray-600 hover:bg-gray-100">Landing</button><button onClick={() => setDesktopView('terrain')} className="rounded-full bg-primary px-4 py-2 font-semibold text-white">Open 3D terrain</button></div>
             </nav>
 
             <section className="mx-auto grid max-w-7xl gap-10 py-16 lg:grid-cols-[0.72fr_1.28fr] lg:items-center">
               <div>
                 <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-blue-50 px-4 py-2 text-sm text-blue-700"><Shield className="h-4 w-4" /> 3D terrain + DPWH projects</div>
-                <h1 className="text-5xl font-black tracking-tight text-gray-900 md:text-7xl">Browse hazards, tilt terrain, inspect projects.</h1>
-                <p className="mt-6 max-w-2xl text-lg leading-8 text-gray-600">FloodLens starts with a Philippines-wide flood concentration view, then streams only the PMTiles byte ranges needed as planners zoom into NOAH hazard data.</p>
+                <h1 className="text-5xl font-black tracking-tight text-gray-900 md:text-7xl">Flood Watch</h1>
+                <p className="mt-6 max-w-2xl text-lg leading-8 text-gray-600">By BetterGov.ph. Browse Philippines-wide flood hazards, tilt 3D terrain, and inspect DPWH flood-control projects with PostGIS-backed project pins.</p>
                 <div className="mt-8 flex gap-3"><button onClick={() => setDesktopView('terrain')} className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 font-semibold text-white transition hover:bg-blue-600">Open 3D terrain <ChevronRight className="h-4 w-4" /></button></div>
               </div>
               <MapPreview {...mapProps} />
