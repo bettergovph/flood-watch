@@ -147,6 +147,7 @@ ON CONFLICT (contract_id) DO UPDATE SET
   updated_at = now();
 COMMIT;
 ANALYZE dpwh_projects;
+REFRESH MATERIALIZED VIEW flood_control_yearly_funding_grid;
 """
     subprocess.run(["psql", database_url, "-v", "ON_ERROR_STOP=1"], input=sql, text=True, check=True)
 

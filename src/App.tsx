@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import {
   BarChart3,
+  CalendarClock,
   ChevronRight,
   Clock3,
   Database,
@@ -19,11 +20,18 @@ import {
 
 type Scenario = 'Clear' | '5-Year Flood' | '25-Year Flood' | '50-Year Flood' | '100-Year Flood';
 type Tool = 'Flood Wall' | 'Retention Basin' | 'Diversion Channel' | 'Pump Station';
-type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'projects' | 'buildings' | 'houses';
+type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'projects' | 'funding' | 'buildings' | 'houses';
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
 type MobilePanel = 'map' | 'browse' | 'terrain';
 type ProjectFilter = 'all' | 'ongoing' | 'completed' | 'withReports' | 'withSatellite' | 'largeBudget';
 type MapViewport = { center: [number, number]; zoom: number; bounds: [[number, number], [number, number]] };
+type FundingYearSummary = { funding_year: number; cell_count: number; project_count: number; total_budget: number; total_cost: number };
+type FundingHeatmapFeature = {
+  type: 'Feature';
+  properties: { year: number; projectCount: number; totalBudget: number; totalCost: number; maxProjectBudget: number; topContractIds: string[] };
+  geometry: { type: 'Point'; coordinates: [number, number] };
+};
+type FundingHeatmapData = { type: 'FeatureCollection'; selectedYear: number | null; years: FundingYearSummary[]; features: FundingHeatmapFeature[] };
 
 type LocationPreset = { name: string; subtitle: string; center: [number, number]; zoom: number; national?: boolean; projectQuery: string };
 type FloodControlProject = {
@@ -196,6 +204,13 @@ function filterFloodControlProjects(projects: FloodControlProject[], filter: Pro
   return projects.filter((project) => (project.budget ?? 0) >= 100_000_000);
 }
 
+function projectFundingYear(project: FloodControlProject) {
+  const match = String(project.infraYear ?? '').match(/\d{4}/);
+  if (!match) return null;
+  const year = Number(match[0]);
+  return Number.isFinite(year) ? year : null;
+}
+
 function projectWithinBounds(project: FloodControlProject, bounds: MapViewport['bounds'], paddingRatio = 0.12) {
   const [[west, south], [east, north]] = bounds;
   const lngPad = Math.max(0.08, (east - west) * paddingRatio);
@@ -247,6 +262,15 @@ function asProjectGeojson(projects: FloodControlProject[]) {
   };
 }
 
+function emptyFeatureCollection() {
+  return { type: 'FeatureCollection' as const, features: [] };
+}
+
+function fundingSummaryForYear(data: FundingHeatmapData | null, year: number | null) {
+  if (!data || year === null) return null;
+  return data.years.find((item) => item.funding_year === year) ?? null;
+}
+
 function circlePolygon(center: [number, number], radiusKm: number, points = 48) {
   const [lng, lat] = center;
   const coords: [number, number][] = [];
@@ -295,6 +319,10 @@ function MapPreview({
   drawingTool,
   projects,
   floodControlProjects,
+  fundingHeatmapData,
+  selectedFundingYear,
+  onFundingYearChange,
+  fundingHeatmapLoading,
   onPlaceProject,
   onSelectFloodControlProject,
   onViewportChange,
@@ -311,6 +339,10 @@ function MapPreview({
   drawingTool: Tool | null;
   projects: InfrastructureProject[];
   floodControlProjects: FloodControlProject[];
+  fundingHeatmapData: FundingHeatmapData | null;
+  selectedFundingYear: number | null;
+  onFundingYearChange: (year: number) => void;
+  fundingHeatmapLoading: boolean;
   onPlaceProject: (lngLat: [number, number]) => void;
   onSelectFloodControlProject: (project: FloodControlProject) => void;
   onViewportChange: (viewport: MapViewport) => void;
@@ -327,6 +359,7 @@ function MapPreview({
   const onSelectFloodControlProjectRef = useRef(onSelectFloodControlProject);
   const onViewportChangeRef = useRef(onViewportChange);
   const floodControlProjectsRef = useRef(floodControlProjects);
+  const fundingBufferRef = useRef<'a' | 'b'>('a');
 
   useEffect(() => {
     drawingToolRef.current = drawingTool;
@@ -344,6 +377,7 @@ function MapPreview({
       container: ref.current,
       style: {
         version: 8,
+        transition: { duration: 650, delay: 0 },
         sources: {
           osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' },
           noah: { type: 'vector', url: `pmtiles://${window.location.origin}${datasetUrl}`, attribution: 'Project NOAH / BetterGov.ph' },
@@ -355,6 +389,8 @@ function MapPreview({
           // MapLibre fill-extrusion layers instead.
           buildings: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
           floodControlProjects: { type: 'geojson', data: asProjectGeojson([]) },
+          fundingHeatmapA: { type: 'geojson', data: emptyFeatureCollection() },
+          fundingHeatmapB: { type: 'geojson', data: emptyFeatureCollection() },
           mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
         },
         layers: [
@@ -455,6 +491,34 @@ function MapPreview({
           'text-halo-width': 1.5,
           'text-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.72, 7.2, 0],
         },
+      });
+      (['a', 'b'] as const).forEach((buffer) => {
+        map.addLayer({
+          id: `funding-heatmap-${buffer}`,
+          type: 'heatmap',
+          source: `fundingHeatmap${buffer.toUpperCase()}`,
+          maxzoom: 12,
+          paint: {
+            'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'totalBudget'], 0], 0, 0, 50000000, 0.35, 200000000, 1],
+            'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.75, 9, 1.85, 12, 2.35],
+            'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(16,185,129,0)', 0.25, 'rgba(45,212,191,0.38)', 0.5, 'rgba(14,165,233,0.55)', 0.75, 'rgba(245,158,11,0.72)', 1, 'rgba(220,38,38,0.9)'],
+            'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 20, 8, 44, 12, 82],
+            'heatmap-opacity': 0,
+          },
+        });
+        map.addLayer({
+          id: `funding-heatmap-points-${buffer}`,
+          type: 'circle',
+          source: `fundingHeatmap${buffer.toUpperCase()}`,
+          minzoom: 8.5,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'totalBudget'], 0], 0, 4, 50000000, 8, 250000000, 15],
+            'circle-color': '#0ea5e9',
+            'circle-opacity': 0,
+            'circle-stroke-color': '#ecfeff',
+            'circle-stroke-width': 1.4,
+          },
+        });
       });
       sourceLayers.forEach((layer) => {
         map.addLayer({
@@ -583,6 +647,10 @@ function MapPreview({
         if (!map.getLayer(id)) return;
         map.setLayoutProperty(id, 'visibility', visibleLayers.projects ? 'visible' : 'none');
       });
+      ['funding-heatmap-a', 'funding-heatmap-b', 'funding-heatmap-points-a', 'funding-heatmap-points-b'].forEach((id) => {
+        if (!map.getLayer(id)) return;
+        map.setLayoutProperty(id, 'visibility', visibleLayers.funding ? 'visible' : 'none');
+      });
       ['building-extrusions', 'house-extrusions'].forEach((id) => {
         if (!map.getLayer(id)) return;
         const visible = id === 'building-extrusions' ? visibleLayers.buildings : visibleLayers.houses;
@@ -628,6 +696,51 @@ function MapPreview({
     source?.setData(asProjectGeojson(floodControlProjects));
   }, [floodControlProjects]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !fundingHeatmapData) return;
+    const applyFundingData = () => {
+      const nextBuffer = fundingBufferRef.current === 'a' ? 'b' : 'a';
+      const previousBuffer = fundingBufferRef.current;
+      const nextSource = map.getSource(`fundingHeatmap${nextBuffer.toUpperCase()}`) as maplibregl.GeoJSONSource | undefined;
+      if (!nextSource) return;
+      nextSource.setData(fundingHeatmapData);
+      const nextLayer = `funding-heatmap-${nextBuffer}`;
+      const previousLayer = `funding-heatmap-${previousBuffer}`;
+      const nextPointLayer = `funding-heatmap-points-${nextBuffer}`;
+      const previousPointLayer = `funding-heatmap-points-${previousBuffer}`;
+      if (map.getLayer(nextLayer)) map.setPaintProperty(nextLayer, 'heatmap-opacity', visibleLayers.funding ? 0.82 : 0);
+      if (map.getLayer(previousLayer)) map.setPaintProperty(previousLayer, 'heatmap-opacity', 0);
+      if (map.getLayer(nextPointLayer)) map.setPaintProperty(nextPointLayer, 'circle-opacity', visibleLayers.funding ? ['interpolate', ['linear'], ['zoom'], 8.5, 0, 11, 0.74] : 0);
+      if (map.getLayer(previousPointLayer)) map.setPaintProperty(previousPointLayer, 'circle-opacity', 0);
+      fundingBufferRef.current = nextBuffer;
+    };
+    if (map.isStyleLoaded()) applyFundingData();
+    else map.once('idle', applyFundingData);
+  }, [fundingHeatmapData, visibleLayers.funding]);
+
+  const fundingYears = fundingHeatmapData?.years.map((item) => item.funding_year).filter(Number.isFinite) ?? [];
+  const activeFundingYear = selectedFundingYear ?? fundingHeatmapData?.selectedYear ?? fundingYears[fundingYears.length - 1] ?? null;
+  const activeFundingSummary = fundingSummaryForYear(fundingHeatmapData, activeFundingYear);
+  const activeFundingIndex = activeFundingYear === null ? -1 : fundingYears.indexOf(activeFundingYear);
+  const fundingTickYears = fundingYears.filter((_, index) => mobileApp || fundingYears.length <= 8 || index === 0 || index === fundingYears.length - 1 || index % 2 === 0);
+  const [timelineIndex, setTimelineIndex] = useState(0);
+  const [timelineDragging, setTimelineDragging] = useState(false);
+
+  useEffect(() => {
+    if (timelineDragging || activeFundingIndex < 0) return;
+    setTimelineIndex(activeFundingIndex);
+  }, [activeFundingIndex, timelineDragging]);
+
+  const updateTimelinePosition = (value: number, snap = false) => {
+    const maxIndex = Math.max(0, fundingYears.length - 1);
+    const nextIndex = clamp(value, 0, maxIndex);
+    const snappedIndex = clamp(Math.round(nextIndex), 0, maxIndex);
+    setTimelineIndex(snap ? snappedIndex : nextIndex);
+    const nextYear = fundingYears[snappedIndex];
+    if (nextYear !== undefined && nextYear !== activeFundingYear) onFundingYearChange(nextYear);
+  };
+
   return (
     <div className={`relative overflow-hidden bg-white shadow-glow ${mobileApp ? 'h-full rounded-none border-0' : fullScreen ? 'h-full min-h-0 rounded-none border-0' : 'h-[68svh] min-h-[440px] rounded-[1.35rem] border border-blue-100 sm:h-[72svh] md:h-[660px] md:rounded-[2rem]'}`}>
       <div ref={ref} className={`absolute inset-0 ${drawingTool ? 'cursor-crosshair' : ''}`} />
@@ -643,7 +756,61 @@ function MapPreview({
         {!mobileApp && <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-700 sm:mt-3 sm:text-xs"><Database className="h-3.5 w-3.5" /> PMTiles range loading</div>}
       </div>
       {drawingTool && <div className={`absolute z-10 rounded-2xl border border-amber-200 bg-amber-300 p-3 text-center text-sm font-semibold text-gray-900 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
-      {!mobileApp && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-gray-200 bg-white/85 p-4 text-gray-900 backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-primary" /> {layer}</div>)}</div>}
+      {visibleLayers.funding && fundingYears.length > 0 && (
+        <div className={`absolute z-20 rounded-xl border border-gray-200 bg-white/90 text-gray-900 shadow-2xl backdrop-blur-xl ${mobileApp ? 'bottom-[5.4rem] left-3 right-3 p-2.5' : fullScreen ? 'bottom-6 left-6 w-[min(540px,calc(100vw-36rem))] p-3' : 'bottom-5 left-1/2 w-[min(560px,calc(100%-2.5rem))] -translate-x-1/2 p-3'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-primary"><CalendarClock className="h-3.5 w-3.5" /> Funding timeline</div>
+              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <div className="text-xl font-black">{activeFundingYear ?? 'n/a'}</div>
+                <div className="text-xs text-gray-600">{fundingHeatmapLoading ? 'Updating...' : `${fmtPeso(activeFundingSummary?.total_budget)} funded`}</div>
+                <div className="text-[11px] text-gray-500">{fmtNumber(activeFundingSummary?.project_count ?? fundingHeatmapData?.features.length ?? 0)} projects</div>
+              </div>
+            </div>
+            <div className="hidden items-center gap-2 text-[11px] text-gray-500 sm:flex">
+              <span>{fundingYears[0]}</span>
+              <span>{fundingYears[fundingYears.length - 1]}</span>
+            </div>
+          </div>
+          <div className="mt-1.5">
+            <input
+              className="m-0 w-full cursor-pointer accent-primary"
+              type="range"
+              min={0}
+              max={Math.max(0, fundingYears.length - 1)}
+              step={0.01}
+              value={timelineIndex}
+              onPointerDown={() => setTimelineDragging(true)}
+              onPointerUp={(event) => {
+                setTimelineDragging(false);
+                updateTimelinePosition(Number(event.currentTarget.value), true);
+              }}
+              onPointerCancel={(event) => {
+                setTimelineDragging(false);
+                updateTimelinePosition(Number(event.currentTarget.value), true);
+              }}
+              onBlur={(event) => {
+                setTimelineDragging(false);
+                updateTimelinePosition(Number(event.currentTarget.value), true);
+              }}
+              onChange={(event) => updateTimelinePosition(Number(event.target.value))}
+            />
+            <div className="relative -mt-1 h-5 border-t border-gray-300">
+              {fundingYears.map((year, index) => {
+                const left = fundingYears.length === 1 ? 0 : (index / (fundingYears.length - 1)) * 100;
+                const showLabel = fundingTickYears.includes(year);
+                return (
+                  <div key={year} className="absolute top-0 -translate-x-1/2" style={{ left: `${left}%` }}>
+                    <div className={`mx-auto w-px bg-gray-400 ${showLabel ? 'h-2' : 'h-1.5 opacity-60'}`} />
+                    {showLabel && <div className="mt-0.5 text-[9px] font-semibold leading-none text-gray-500">{year}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {!mobileApp && !visibleLayers.funding && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-gray-200 bg-white/85 p-4 text-gray-900 backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-primary" /> {layer}</div>)}</div>}
     </div>
   );
 }
@@ -660,12 +827,15 @@ export default function App() {
   const [scenarioName, setScenarioName] = useState<Scenario>('100-Year Flood');
   const [opacity, setOpacity] = useState(0.58);
   const [selectedLocation, setSelectedLocation] = useState(locations[0]);
-  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false, projects: true, buildings: false, houses: false });
+  const [visibleLayers, setVisibleLayers] = useState<Record<LayerKey, boolean>>({ flood: true, landslide: false, stormSurge: false, debrisFlow: false, projects: true, funding: true, buildings: false, houses: false });
   const [terrainEnabled, setTerrainEnabled] = useState(true);
   const [terrainExaggeration, setTerrainExaggeration] = useState(2.2);
   const [drawingTool, setDrawingTool] = useState<Tool | null>(null);
   const [projects, setProjects] = useState<InfrastructureProject[]>([]);
   const [floodControlProjects, setFloodControlProjects] = useState<FloodControlProject[]>([]);
+  const [fundingHeatmapData, setFundingHeatmapData] = useState<FundingHeatmapData | null>(null);
+  const [selectedFundingYear, setSelectedFundingYear] = useState<number | null>(null);
+  const [fundingHeatmapState, setFundingHeatmapState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
   const [selectedFloodControlProject, setSelectedFloodControlProject] = useState<FloodControlProject | null>(null);
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all');
   const [projectSearchState, setProjectSearchState] = useState<{ loading: boolean; error: string | null; total: number; query: string }>({ loading: true, error: null, total: 0, query: '' });
@@ -695,6 +865,15 @@ export default function App() {
     if (mapViewport.zoom < 7) return filtered;
     return filtered.filter((project) => projectWithinBounds(project, mapViewport.bounds));
   }, [floodControlProjects, projectFilter, mapViewport]);
+  const yearFilteredFloodControlProjects = useMemo(() => {
+    if (selectedFundingYear === null) return filteredFloodControlProjects;
+    return filteredFloodControlProjects.filter((project) => projectFundingYear(project) === selectedFundingYear);
+  }, [filteredFloodControlProjects, selectedFundingYear]);
+  useEffect(() => {
+    if (!selectedFloodControlProject) return;
+    if (yearFilteredFloodControlProjects.some((project) => project.contractId === selectedFloodControlProject.contractId)) return;
+    setSelectedFloodControlProject(null);
+  }, [selectedFloodControlProject, yearFilteredFloodControlProjects]);
   const toggleLayer = (layer: LayerKey) => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const jumpToLocation = (location: LocationPreset) => {
     setProjectSearchState((current) => ({ ...current, loading: true, error: null, total: 0 }));
@@ -734,6 +913,38 @@ export default function App() {
     };
   }, [projectQuery, projectLimit, projectBbox, mapViewport.zoom]);
 
+  useEffect(() => {
+    if (!visibleLayers.funding) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams({ bbox: projectBbox });
+      if (selectedFundingYear !== null) params.set('year', String(selectedFundingYear));
+      setFundingHeatmapState({ loading: true, error: null });
+      fetch(`/api/flood-funding-heatmap?${params.toString()}`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Funding heatmap failed (${response.status})`);
+          return response.json();
+        })
+        .then((payload: FundingHeatmapData) => {
+          setFundingHeatmapData(payload);
+          setSelectedFundingYear((current) => {
+            const availableYears = payload.years.map((item) => item.funding_year);
+            if (current !== null && availableYears.includes(current)) return current;
+            return payload.selectedYear ?? availableYears[availableYears.length - 1] ?? null;
+          });
+          setFundingHeatmapState({ loading: false, error: null });
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setFundingHeatmapState({ loading: false, error: error instanceof Error ? error.message : 'Funding heatmap failed' });
+        });
+    }, 220);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [visibleLayers.funding, projectBbox, selectedFundingYear]);
+
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;
     setProjects((current) => [...current, makeProject(drawingTool, lngLat, current.length + 1)]);
@@ -754,7 +965,7 @@ export default function App() {
     { key: 'terrain' as const, label: '3D', icon: Mountain },
   ];
 
-  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: filteredFloodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, onViewportChange: handleViewportChange, navigationSeq };
+  const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: yearFilteredFloodControlProjects, fundingHeatmapData, selectedFundingYear, onFundingYearChange: setSelectedFundingYear, fundingHeatmapLoading: fundingHeatmapState.loading, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, onViewportChange: handleViewportChange, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
@@ -770,12 +981,19 @@ export default function App() {
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-2xl bg-gray-50 p-3"><div className="text-gray-500">Scenario</div><div className="font-bold text-primary">{scenario.name}</div></div>
           <div className="rounded-2xl bg-gray-50 p-3"><div className="text-gray-500">Location</div><div className="font-bold text-primary">{selectedLocation.name}</div></div>
-          <div className="col-span-2 rounded-2xl bg-amber-50 p-3"><div className="text-gray-500">Flood-control projects</div><div className="font-bold text-amber-800">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} in view${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div><div className="mt-1 text-xs text-amber-700/70">Auto-updates as you pan/zoom{projectSearchState.query ? ` · query: ${projectSearchState.query}` : ''}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
+          <div className="col-span-2 rounded-2xl bg-amber-50 p-3"><div className="text-gray-500">Flood-control projects</div><div className="font-bold text-amber-800">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(yearFilteredFloodControlProjects.length)} pins${selectedFundingYear ? ` in ${selectedFundingYear}` : ''}${filteredFloodControlProjects.length > yearFilteredFloodControlProjects.length ? ` / ${fmtNumber(filteredFloodControlProjects.length)} in view` : floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div><div className="mt-1 text-xs text-amber-700/70">Auto-updates as you pan/zoom{projectSearchState.query ? ` · query: ${projectSearchState.query}` : ''}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
         </div>
       </div>
 
       <div className="rounded-3xl border border-amber-200 bg-white/90 p-5 backdrop-blur-2xl">
-        <div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.2em] text-amber-800">Project overlay</div><h3 className="mt-1 font-bold text-gray-900">DPWH flood-control filters</h3></div><label className="flex items-center gap-2 text-sm text-amber-800"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label></div>
+        <div className="flex items-start justify-between gap-3">
+          <div><div className="text-xs uppercase tracking-[0.2em] text-amber-800">Project overlay</div><h3 className="mt-1 font-bold text-gray-900">DPWH flood-control filters</h3></div>
+          <div className="grid gap-2 text-sm text-amber-800">
+            <label className="flex items-center justify-end gap-2"><span>Funding heatmap</span><input type="checkbox" checked={visibleLayers.funding} onChange={() => toggleLayer('funding')} /></label>
+            <label className="flex items-center justify-end gap-2"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label>
+          </div>
+        </div>
+        {fundingHeatmapState.error && <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{fundingHeatmapState.error}</div>}
         <div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => { setProjectFilter(filter.key); setSelectedFloodControlProject(null); }} className={`rounded-2xl border p-3 text-left text-sm transition ${projectFilter === filter.key ? 'border-amber-300 bg-amber-300 text-gray-900' : 'border-gray-200 bg-gray-50 text-gray-900 hover:bg-gray-100'}`}><span className="block font-semibold">{filter.label}</span><span className="mt-1 block text-xs opacity-75">{filter.description}</span></button>)}</div>
       </div>
 
@@ -831,7 +1049,14 @@ export default function App() {
                 <div className="space-y-5">
                   <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
                   <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
-                  <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} in current view</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-amber-300 text-gray-900' : 'bg-gray-100 text-amber-800'}`}>{filter.label}</button>)}</div></div>
+                  <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
+                    <div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : `${fmtNumber(yearFilteredFloodControlProjects.length)}${selectedFundingYear ? ` in ${selectedFundingYear}` : ''}`}</div>
+                    <div className="mt-3 grid gap-2">
+                      <label className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2"><span>Funding heatmap</span><input type="checkbox" checked={visibleLayers.funding} onChange={() => toggleLayer('funding')} /></label>
+                      <label className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-amber-300 text-gray-900' : 'bg-gray-100 text-amber-800'}`}>{filter.label}</button>)}</div>
+                  </div>
                 </div>
               )}
 
@@ -895,7 +1120,7 @@ export default function App() {
           <section className="fixed inset-0 bg-white">
             <MapPreview {...mapProps} fullScreen />
             <aside className="absolute bottom-6 right-6 top-6 z-20 w-[430px] max-w-[calc(100vw-3rem)] rounded-[2rem] border border-gray-200 bg-white/88 p-4 shadow-2xl backdrop-blur-2xl">{controlsPanel}</aside>
-            <div className="pointer-events-none absolute bottom-6 left-6 z-10 rounded-2xl border border-gray-200 bg-white/80 px-4 py-3 text-sm text-gray-600 backdrop-blur-xl"><span className="font-semibold text-primary">Tip:</span> use the panel to jump locations; rotate and pitch directly on the map.</div>
+            {!visibleLayers.funding && <div className="pointer-events-none absolute bottom-6 left-6 z-10 rounded-2xl border border-gray-200 bg-white/80 px-4 py-3 text-sm text-gray-600 backdrop-blur-xl"><span className="font-semibold text-primary">Tip:</span> use the panel to jump locations; rotate and pitch directly on the map.</div>}
           </section>
         )}
       </div>

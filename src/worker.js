@@ -106,6 +106,124 @@ function buildProjectSearchSql(query, bbox, limit) {
   };
 }
 
+function parseYear(value) {
+  if (!value) return null;
+  const year = Number(value);
+  return Number.isInteger(year) && year >= 1900 && year <= 2200 ? year : null;
+}
+
+function buildFundingHeatmapSql(bbox, year) {
+  const values = [];
+  const clauses = ['geom IS NOT NULL'];
+  if (bbox) {
+    values.push(bbox.west, bbox.south, bbox.east, bbox.north);
+    clauses.push(`geom && ST_MakeEnvelope($${values.length - 3}, $${values.length - 2}, $${values.length - 1}, $${values.length}, 4326)`);
+  }
+  const yearClauses = [...clauses];
+  if (year) {
+    values.push(year);
+    yearClauses.push(`funding_year = $${values.length}`);
+  }
+  const whereSql = clauses.join('\n      AND ');
+  const yearWhereSql = yearClauses.join('\n      AND ');
+  return {
+    values,
+    sql: `
+      WITH available_years AS (
+        SELECT
+          funding_year,
+          count(*)::int AS cell_count,
+          sum(project_count)::int AS project_count,
+          sum(total_budget)::float8 AS total_budget,
+          sum(total_cost)::float8 AS total_cost
+        FROM flood_control_yearly_funding_grid
+        WHERE ${whereSql}
+        GROUP BY funding_year
+      ), selected_year AS (
+        SELECT coalesce(
+          (SELECT funding_year FROM available_years WHERE funding_year = ${year ? `$${values.length}` : 'null'}::integer),
+          max(funding_year)
+        ) AS funding_year
+        FROM available_years
+      ), heat_cells AS (
+        SELECT
+          funding_year,
+          ST_X(geom)::float8 AS longitude,
+          ST_Y(geom)::float8 AS latitude,
+          project_count,
+          total_budget::float8 AS total_budget,
+          total_cost::float8 AS total_cost,
+          max_project_budget::float8 AS max_project_budget,
+          contract_ids[1:5] AS top_contract_ids
+        FROM flood_control_yearly_funding_grid
+        WHERE ${yearWhereSql}
+          AND funding_year = (SELECT funding_year FROM selected_year)
+        ORDER BY total_budget DESC NULLS LAST
+        LIMIT 900
+      )
+      SELECT
+        coalesce((SELECT json_agg(available_years ORDER BY funding_year) FROM available_years), '[]'::json) AS years,
+        (SELECT funding_year FROM selected_year) AS selected_year,
+        coalesce((SELECT json_agg(heat_cells ORDER BY total_budget DESC NULLS LAST) FROM heat_cells), '[]'::json) AS cells
+    `,
+  };
+}
+
+function fundingCellToFeature(row) {
+  return {
+    type: 'Feature',
+    properties: {
+      year: row.funding_year,
+      projectCount: row.project_count ?? 0,
+      totalBudget: toNumber(row.total_budget) ?? 0,
+      totalCost: toNumber(row.total_cost) ?? 0,
+      maxProjectBudget: toNumber(row.max_project_budget) ?? 0,
+      topContractIds: row.top_contract_ids ?? [],
+    },
+    geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] },
+  };
+}
+
+async function queryFundingHeatmap(request, env) {
+  const startedAt = Date.now();
+  const url = new URL(request.url);
+  const bbox = parseBbox(url.searchParams.get('bbox'));
+  const year = parseYear(url.searchParams.get('year'));
+  const cacheKey = new Request(url.toString(), request);
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const connectionString = env.HYPERDRIVE?.connectionString || env.DATABASE_URL;
+  if (!connectionString) {
+    return jsonResponse({ error: 'DATABASE_URL or HYPERDRIVE binding is not configured' }, { status: 500 });
+  }
+
+  const client = new Client({ connectionString });
+  try {
+    await client.connect();
+    const { sql, values } = buildFundingHeatmapSql(bbox, year);
+    const dbResult = await client.query(sql, values);
+    const result = dbResult.rows[0] ?? { years: [], cells: [] };
+    const years = result.years ?? [];
+    const cells = result.cells ?? [];
+    const selectedYear = result.selected_year ?? year ?? years[years.length - 1]?.funding_year ?? null;
+    const response = jsonResponse({
+      type: 'FeatureCollection',
+      selectedYear,
+      years,
+      processingTimeMs: Date.now() - startedAt,
+      features: cells.map(fundingCellToFeature),
+    }, { headers: { 'cache-control': 'public, max-age=300' } });
+    await cache.put(cacheKey, response.clone());
+    return response;
+  } catch (error) {
+    return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown PostGIS funding heatmap error' }, { status: 500 });
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 async function queryProjects(request, env) {
   const startedAt = Date.now();
   const url = new URL(request.url);
@@ -199,6 +317,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/flood-control-projects') {
       return queryProjects(request, env);
+    }
+    if (url.pathname === '/api/flood-funding-heatmap') {
+      return queryFundingHeatmap(request, env);
     }
     if (url.pathname === '/datasets/noah_hazard_maps.pmtiles') {
       return serveDataset(request, env);
