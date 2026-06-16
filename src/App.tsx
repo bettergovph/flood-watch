@@ -281,6 +281,10 @@ function asMitigationGeojson(projects: InfrastructureProject[]): MitigationFeatu
   };
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function MapPreview({
   scenario,
   opacity,
@@ -366,6 +370,44 @@ function MapPreview({
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    map.dragRotate.enable();
+    map.touchZoomRotate.enable();
+    map.touchZoomRotate.enableRotation();
+    map.keyboard.enable();
+
+    const canvas = map.getCanvas();
+    let modifierDrag: { pointerId: number; x: number; y: number; bearing: number; pitch: number } | null = null;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || (!event.altKey && !event.metaKey)) return;
+      event.preventDefault();
+      modifierDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, bearing: map.getBearing(), pitch: map.getPitch() };
+      canvas.setPointerCapture(event.pointerId);
+      map.dragPan.disable();
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!modifierDrag || event.pointerId !== modifierDrag.pointerId) return;
+      event.preventDefault();
+      const dx = event.clientX - modifierDrag.x;
+      const dy = event.clientY - modifierDrag.y;
+      map.jumpTo({
+        bearing: modifierDrag.bearing - dx * 0.35,
+        pitch: clamp(modifierDrag.pitch + dy * 0.25, 0, 85),
+      });
+    };
+    const endModifierDrag = (event: PointerEvent) => {
+      if (!modifierDrag || event.pointerId !== modifierDrag.pointerId) return;
+      try {
+        canvas.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already be released by the browser.
+      }
+      modifierDrag = null;
+      map.dragPan.enable();
+    };
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', endModifierDrag);
+    canvas.addEventListener('pointercancel', endModifierDrag);
 
     map.on('load', () => {
       map.addLayer({
@@ -510,6 +552,10 @@ function MapPreview({
       popupRef.current?.remove();
       map.off('moveend', emitViewport);
       map.off('zoomend', emitViewport);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', endModifierDrag);
+      canvas.removeEventListener('pointercancel', endModifierDrag);
       map.remove();
       mapRef.current = null;
     };
@@ -825,8 +871,10 @@ export default function App() {
                 <div className="mt-6 max-w-xl rounded-2xl border border-gray-200 bg-white/80 p-4 text-sm text-gray-700 shadow-sm">
                   <div className="font-semibold text-gray-900">Map controls</div>
                   <div className="mt-3 grid gap-2">
-                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Mouse</span><span>Drag to pan, scroll to zoom, right-drag or hold Ctrl while dragging to rotate and tilt.</span></div>
-                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Touch</span><span>Drag with one finger to pan, pinch with two fingers to zoom, twist or drag with two fingers to rotate and tilt.</span></div>
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Mouse</span><span>Drag to pan. Scroll to zoom. Right-click and drag to rotate and pitch.</span></div>
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Mac</span><span>Use two-finger trackpad scroll to zoom. Hold Option and drag to rotate and pitch.</span></div>
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Touch</span><span>Drag with one finger to pan. Pinch with two fingers to zoom. Twist or two-finger drag to rotate and pitch.</span></div>
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Keys</span><span>Use + and - to zoom. Use the map's +/- and compass buttons for precise zoom and reset north.</span></div>
                   </div>
                 </div>
                 <div className="mt-8 flex gap-3"><button onClick={() => setDesktopView('terrain')} className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 font-semibold text-white transition hover:bg-blue-600">Open 3D terrain <ChevronRight className="h-4 w-4" /></button></div>
