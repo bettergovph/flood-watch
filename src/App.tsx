@@ -851,6 +851,7 @@ export default function App() {
   // contain the word “Bicol” in searchable fields).
   const projectQuery = '';
   const projectLimit = mapViewport.zoom < 7 ? 1200 : mapViewport.zoom < 10 ? 900 : 450;
+  const fundingHeatmapLimit = mapViewport.zoom < 6 ? 5000 : mapViewport.zoom < 8 ? 3200 : mapViewport.zoom < 11 ? 1800 : 900;
   const projectBbox = useMemo(() => viewportBboxParam(mapViewport.bounds), [mapViewport.bounds]);
   const handleViewportChange = useCallback((viewport: MapViewport) => {
     setMapViewport((current) => {
@@ -917,7 +918,7 @@ export default function App() {
     if (!visibleLayers.funding) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams({ bbox: projectBbox });
+      const params = new URLSearchParams({ bbox: projectBbox, limit: String(fundingHeatmapLimit) });
       if (selectedFundingYear !== null) params.set('year', String(selectedFundingYear));
       setFundingHeatmapState({ loading: true, error: null });
       fetch(`/api/flood-funding-heatmap?${params.toString()}`, { signal: controller.signal })
@@ -943,7 +944,7 @@ export default function App() {
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [visibleLayers.funding, projectBbox, selectedFundingYear]);
+  }, [visibleLayers.funding, projectBbox, selectedFundingYear, fundingHeatmapLimit]);
 
   const placeProject = (lngLat: [number, number]) => {
     if (!drawingTool) return;

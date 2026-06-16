@@ -112,7 +112,7 @@ function parseYear(value) {
   return Number.isInteger(year) && year >= 1900 && year <= 2200 ? year : null;
 }
 
-function buildFundingHeatmapSql(bbox, year) {
+function buildFundingHeatmapSql(bbox, year, limit) {
   const values = [];
   const clauses = ['geom IS NOT NULL'];
   if (bbox) {
@@ -120,12 +120,16 @@ function buildFundingHeatmapSql(bbox, year) {
     clauses.push(`geom && ST_MakeEnvelope($${values.length - 3}, $${values.length - 2}, $${values.length - 1}, $${values.length}, 4326)`);
   }
   const yearClauses = [...clauses];
+  let yearParam = null;
   if (year) {
     values.push(year);
-    yearClauses.push(`funding_year = $${values.length}`);
+    yearParam = values.length;
+    yearClauses.push(`funding_year = $${yearParam}`);
   }
   const whereSql = clauses.join('\n      AND ');
   const yearWhereSql = yearClauses.join('\n      AND ');
+  values.push(limit);
+  const limitParam = values.length;
   return {
     values,
     sql: `
@@ -141,7 +145,7 @@ function buildFundingHeatmapSql(bbox, year) {
         GROUP BY funding_year
       ), selected_year AS (
         SELECT coalesce(
-          (SELECT funding_year FROM available_years WHERE funding_year = ${year ? `$${values.length}` : 'null'}::integer),
+          (SELECT funding_year FROM available_years WHERE funding_year = ${yearParam ? `$${yearParam}` : 'null'}::integer),
           max(funding_year)
         ) AS funding_year
         FROM available_years
@@ -159,7 +163,7 @@ function buildFundingHeatmapSql(bbox, year) {
         WHERE ${yearWhereSql}
           AND funding_year = (SELECT funding_year FROM selected_year)
         ORDER BY total_budget DESC NULLS LAST
-        LIMIT 900
+        LIMIT $${limitParam}
       )
       SELECT
         coalesce((SELECT json_agg(available_years ORDER BY funding_year) FROM available_years), '[]'::json) AS years,
@@ -189,6 +193,7 @@ async function queryFundingHeatmap(request, env) {
   const url = new URL(request.url);
   const bbox = parseBbox(url.searchParams.get('bbox'));
   const year = parseYear(url.searchParams.get('year'));
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 1800, 250), 5000);
   const cacheKey = new Request(url.toString(), request);
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
@@ -202,7 +207,7 @@ async function queryFundingHeatmap(request, env) {
   const client = new Client({ connectionString });
   try {
     await client.connect();
-    const { sql, values } = buildFundingHeatmapSql(bbox, year);
+    const { sql, values } = buildFundingHeatmapSql(bbox, year, limit);
     const dbResult = await client.query(sql, values);
     const result = dbResult.rows[0] ?? { years: [], cells: [] };
     const years = result.years ?? [];
@@ -212,6 +217,7 @@ async function queryFundingHeatmap(request, env) {
       type: 'FeatureCollection',
       selectedYear,
       years,
+      limit,
       processingTimeMs: Date.now() - startedAt,
       features: cells.map(fundingCellToFeature),
     }, { headers: { 'cache-control': 'public, max-age=300' } });
