@@ -820,6 +820,13 @@ export default function App() {
                 <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-blue-50 px-4 py-2 text-sm text-blue-700"><Shield className="h-4 w-4" /> 3D terrain + DPWH projects</div>
                 <h1 className="text-5xl font-black tracking-tight text-gray-900 md:text-7xl">Flood Watch</h1>
                 <p className="mt-6 max-w-2xl text-lg leading-8 text-gray-600">By BetterGov.ph. Browse Philippines-wide flood hazards, tilt 3D terrain, and inspect DPWH flood-control projects with PostGIS-backed project pins.</p>
+                <div className="mt-6 max-w-xl rounded-2xl border border-gray-200 bg-white/80 p-4 text-sm text-gray-700 shadow-sm">
+                  <div className="font-semibold text-gray-900">Map controls</div>
+                  <div className="mt-3 grid gap-2">
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Mouse</span><span>Drag to pan, scroll to zoom, right-drag or hold Ctrl while dragging to rotate and tilt.</span></div>
+                    <div className="flex items-start gap-3"><span className="mt-0.5 font-semibold text-primary">Touch</span><span>Drag with one finger to pan, pinch with two fingers to zoom, twist or drag with two fingers to rotate and tilt.</span></div>
+                  </div>
+                </div>
                 <div className="mt-8 flex gap-3"><button onClick={() => setDesktopView('terrain')} className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 font-semibold text-white transition hover:bg-blue-600">Open 3D terrain <ChevronRight className="h-4 w-4" /></button></div>
               </div>
               <MapPreview {...mapProps} />
