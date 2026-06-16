@@ -2,21 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import {
-  Activity,
   BarChart3,
-  Building2,
   ChevronRight,
   Clock3,
   Database,
-  Droplets,
-  Eye,
-  Factory,
   Home,
   Layers3,
   LocateFixed,
   MapPinned,
   Mountain,
-  Route,
   Shield,
   SlidersHorizontal,
   Waves,
@@ -27,7 +21,7 @@ type Scenario = 'Clear' | '5-Year Flood' | '25-Year Flood' | '50-Year Flood' | '
 type Tool = 'Flood Wall' | 'Retention Basin' | 'Diversion Channel' | 'Pump Station';
 type LayerKey = 'flood' | 'landslide' | 'stormSurge' | 'debrisFlow' | 'projects' | 'buildings' | 'houses';
 type GeometryKind = 'Point' | 'LineString' | 'Polygon';
-type MobilePanel = 'map' | 'browse' | 'terrain' | 'simulate' | 'impact';
+type MobilePanel = 'map' | 'browse' | 'terrain';
 type ProjectFilter = 'all' | 'ongoing' | 'completed' | 'withReports' | 'withSatellite' | 'largeBudget';
 type MapViewport = { center: [number, number]; zoom: number; bounds: [[number, number], [number, number]] };
 
@@ -161,22 +155,22 @@ function projectPopoverHtml(project: FloodControlProject) {
 
   return `
     <div class="floodlens-project-popup">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;color:#fdba74">DPWH flood-control project</div>
-      <div style="margin-top:4px;font-size:16px;font-weight:900;color:#fff7ed">${escapeHtml(project.contractId)}</div>
-      <div style="margin-top:8px;max-height:96px;overflow-y:auto;font-size:13px;line-height:1.45;color:#e2e8f0">${escapeHtml(project.description || 'No description available')}</div>
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;color:#0d56ad">DPWH flood-control project</div>
+      <div style="margin-top:4px;font-size:16px;font-weight:900;color:#111827">${escapeHtml(project.contractId)}</div>
+      <div style="margin-top:8px;max-height:96px;overflow-y:auto;font-size:13px;line-height:1.45;color:#374151">${escapeHtml(project.description || 'No description available')}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;font-size:12px">
-        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Budget</div><div style="font-weight:800;color:#fed7aa">${escapeHtml(fmtPeso(project.budget))}</div></div>
-        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Paid</div><div style="font-weight:800;color:#fed7aa">${escapeHtml(fmtPeso(project.amountPaid))}</div></div>
-        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Status</div><div style="font-weight:800;color:#ffedd5">${escapeHtml(project.status || 'Unknown')}</div></div>
-        <div style="border-radius:10px;background:rgba(255,255,255,.08);padding:8px"><div style="color:#94a3b8">Progress</div><div style="font-weight:800;color:#ffedd5">${progress}%</div></div>
+        <div style="border-radius:10px;background:#f8fafc;padding:8px"><div style="color:#6b7280">Budget</div><div style="font-weight:800;color:#0d56ad">${escapeHtml(fmtPeso(project.budget))}</div></div>
+        <div style="border-radius:10px;background:#f8fafc;padding:8px"><div style="color:#6b7280">Paid</div><div style="font-weight:800;color:#0d56ad">${escapeHtml(fmtPeso(project.amountPaid))}</div></div>
+        <div style="border-radius:10px;background:#f8fafc;padding:8px"><div style="color:#6b7280">Status</div><div style="font-weight:800;color:#111827">${escapeHtml(project.status || 'Unknown')}</div></div>
+        <div style="border-radius:10px;background:#f8fafc;padding:8px"><div style="color:#6b7280">Progress</div><div style="font-weight:800;color:#111827">${progress}%</div></div>
       </div>
-      <div style="margin-top:12px;font-size:12px;line-height:1.55;color:#e2e8f0">
-        <div><strong style="color:#94a3b8">Location:</strong> ${escapeHtml(location)}</div>
-        <div><strong style="color:#94a3b8">Contractor:</strong> ${escapeHtml(project.contractor || 'n/a')}</div>
-        <div><strong style="color:#94a3b8">Program:</strong> ${escapeHtml(project.programName || 'n/a')}</div>
-        <div><strong style="color:#94a3b8">Source:</strong> ${escapeHtml(project.sourceOfFunds || 'n/a')} · <strong style="color:#94a3b8">Year:</strong> ${escapeHtml(project.infraYear || 'n/a')}</div>
-        <div><strong style="color:#94a3b8">Timeline:</strong> ${escapeHtml(fmtDate(project.startDate))} → ${escapeHtml(fmtDate(project.completionDate))}</div>
-        <div><strong style="color:#94a3b8">Reports:</strong> ${fmtNumber(project.reportCount ?? 0)} · <strong style="color:#94a3b8">Satellite:</strong> ${project.hasSatelliteImage ? 'yes' : 'no'}</div>
+      <div style="margin-top:12px;font-size:12px;line-height:1.55;color:#374151">
+        <div><strong style="color:#6b7280">Location:</strong> ${escapeHtml(location)}</div>
+        <div><strong style="color:#6b7280">Contractor:</strong> ${escapeHtml(project.contractor || 'n/a')}</div>
+        <div><strong style="color:#6b7280">Program:</strong> ${escapeHtml(project.programName || 'n/a')}</div>
+        <div><strong style="color:#6b7280">Source:</strong> ${escapeHtml(project.sourceOfFunds || 'n/a')} · <strong style="color:#6b7280">Year:</strong> ${escapeHtml(project.infraYear || 'n/a')}</div>
+        <div><strong style="color:#6b7280">Timeline:</strong> ${escapeHtml(fmtDate(project.startDate))} → ${escapeHtml(fmtDate(project.completionDate))}</div>
+        <div><strong style="color:#6b7280">Reports:</strong> ${fmtNumber(project.reportCount ?? 0)} · <strong style="color:#6b7280">Satellite:</strong> ${project.hasSatelliteImage ? 'yes' : 'no'}</div>
       </div>
     </div>
   `;
@@ -587,31 +581,31 @@ function MapPreview({
   }, [floodControlProjects]);
 
   return (
-    <div className={`relative overflow-hidden bg-slate-950 shadow-glow ${mobileApp ? 'h-full rounded-none border-0' : fullScreen ? 'h-full min-h-0 rounded-none border-0' : 'h-[68svh] min-h-[440px] rounded-[1.35rem] border border-cyan-200/20 sm:h-[72svh] md:h-[660px] md:rounded-[2rem]'}`}>
+    <div className={`relative overflow-hidden bg-white shadow-glow ${mobileApp ? 'h-full rounded-none border-0' : fullScreen ? 'h-full min-h-0 rounded-none border-0' : 'h-[68svh] min-h-[440px] rounded-[1.35rem] border border-blue-100 sm:h-[72svh] md:h-[660px] md:rounded-[2rem]'}`}>
       <div ref={ref} className={`absolute inset-0 ${drawingTool ? 'cursor-crosshair' : ''}`} />
-      <div className={`pointer-events-none absolute rounded-2xl border border-white/15 bg-slate-950/85 text-white backdrop-blur-xl ${mobileApp ? 'left-4 right-4 top-[max(1rem,env(safe-area-inset-top))] p-3' : 'left-3 right-3 top-3 p-3 sm:left-5 sm:right-auto sm:top-5 sm:max-w-sm sm:p-4'}`}>
+      <div className={`pointer-events-none absolute rounded-2xl border border-gray-200 bg-white/85 text-gray-900 backdrop-blur-xl ${mobileApp ? 'left-4 right-4 top-[max(1rem,env(safe-area-inset-top))] p-3' : 'left-3 right-3 top-3 p-3 sm:left-5 sm:right-auto sm:top-5 sm:max-w-sm sm:p-4'}`}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-cyan-200 sm:text-sm sm:tracking-[0.24em]"><Waves className="h-4 w-4" /> FloodLens PH</div>
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-primary sm:text-sm sm:tracking-[0.24em]"><Waves className="h-4 w-4" /> FloodLens PH</div>
             <div className="mt-1 text-lg font-semibold sm:text-2xl">{scenario.name}</div>
-            <div className="mt-0.5 text-xs text-slate-300 sm:text-sm">{selectedLocation.name} · {terrainEnabled ? `${terrainExaggeration.toFixed(1)}× 3D` : '2D view'}</div>
+            <div className="mt-0.5 text-xs text-gray-600 sm:text-sm">{selectedLocation.name} · {terrainEnabled ? `${terrainExaggeration.toFixed(1)}× 3D` : '2D view'}</div>
           </div>
-          <div className="rounded-full bg-emerald-300/15 px-2 py-1 text-[10px] font-bold text-emerald-200">LIVE</div>
+          <div className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">LIVE</div>
         </div>
-        {!mobileApp && <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-300 sm:mt-3 sm:text-xs"><Database className="h-3.5 w-3.5" /> PMTiles range loading</div>}
+        {!mobileApp && <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-700 sm:mt-3 sm:text-xs"><Database className="h-3.5 w-3.5" /> PMTiles range loading</div>}
       </div>
-      {drawingTool && <div className={`absolute z-10 rounded-2xl border border-yellow-200/40 bg-yellow-300 p-3 text-center text-sm font-semibold text-slate-950 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
-      {!mobileApp && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-white/15 bg-slate-950/85 p-4 text-white backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-cyan-300" /> {layer}</div>)}</div>}
+      {drawingTool && <div className={`absolute z-10 rounded-2xl border border-amber-200 bg-amber-300 p-3 text-center text-sm font-semibold text-gray-900 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
+      {!mobileApp && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-gray-200 bg-white/85 p-4 text-gray-900 backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-primary" /> {layer}</div>)}</div>}
     </div>
   );
 }
 
 function ScenarioControls({ scenarioName, setScenarioName }: { scenarioName: Scenario; setScenarioName: (value: Scenario) => void }) {
-  return <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 xl:grid-cols-2">{scenarios.map((item) => <button key={item.name} onClick={() => setScenarioName(item.name)} className={`min-w-0 rounded-2xl border p-3 text-left transition ${scenarioName === item.name ? 'border-cyan-300 bg-cyan-300/15' : 'border-white/10 bg-slate-900/60 hover:bg-white/10'}`}><div className="truncate text-sm font-semibold">{item.name}</div><div className="mt-1 text-base font-black leading-tight" style={{ color: item.color }}>{item.depth}</div></button>)}</div>;
+  return <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 xl:grid-cols-2">{scenarios.map((item) => <button key={item.name} onClick={() => setScenarioName(item.name)} className={`min-w-0 rounded-2xl border p-3 text-left transition ${scenarioName === item.name ? 'border-primary bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-100'}`}><div className="truncate text-sm font-semibold">{item.name}</div><div className="mt-1 text-base font-black leading-tight" style={{ color: item.color }}>{item.depth}</div></button>)}</div>;
 }
 
 function AppButton({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick: () => void }) {
-  return <button onClick={onClick} className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${active ? 'border-cyan-300 bg-cyan-300 text-slate-950' : 'border-white/10 bg-white/5 text-white hover:bg-white/10'}`}>{children}</button>;
+  return <button onClick={onClick} className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${active ? 'border-primary bg-primary text-white' : 'border-gray-200 bg-gray-50 text-gray-900 hover:bg-gray-100'}`}>{children}</button>;
 }
 
 export default function App() {
@@ -648,8 +642,6 @@ export default function App() {
       return viewport;
     });
   }, []);
-  const totalBenefit = Math.min(0.72, projects.reduce((sum, project) => sum + project.benefitScore, 0));
-  const after = { affected: scenario.affected * (1 - totalBenefit), homes: scenario.homes * (1 - totalBenefit), roads: scenario.roads * (1 - totalBenefit * 0.8), assets: scenario.assets * (1 - totalBenefit * 0.9) };
   const filteredFloodControlProjects = useMemo(() => {
     const filtered = filterFloodControlProjects(floodControlProjects, projectFilter);
     if (mapViewport.zoom < 7) return filtered;
@@ -698,160 +690,118 @@ export default function App() {
     if (!drawingTool) return;
     setProjects((current) => [...current, makeProject(drawingTool, lngLat, current.length + 1)]);
     setDrawingTool(null);
-    setMobilePanel('impact');
+    setMobilePanel('map');
   };
-
-  const impactCards = [
-    { label: 'Residents affected', before: fmtNumber(scenario.affected), after: fmtNumber(after.affected), icon: Activity },
-    { label: 'Homes exposed', before: fmtNumber(scenario.homes), after: fmtNumber(after.homes), icon: Building2 },
-    { label: 'Road length flooded', before: `${Math.round(scenario.roads)} km`, after: `${Math.round(after.roads)} km`, icon: Route },
-    { label: 'Asset exposure', before: `₱${scenario.assets.toFixed(1)}B`, after: `₱${after.assets.toFixed(1)}B`, icon: BarChart3 },
-  ];
 
   const featureCards = [
     { title: 'National overview first', body: 'Start with a country-wide flood concentration view, then drill into city-level Project NOAH hazard polygons.', icon: LocateFixed },
     { title: '3D terrain workspace', body: 'Use DEM terrain, hillshade, pitch, and exaggeration controls in a dedicated full-screen map page.', icon: Mountain },
-    { title: 'Mitigation simulation', body: 'Place flood walls, retention basins, diversion channels, and pump stations directly on the map.', icon: Factory },
-    { title: 'Before / after impact', body: 'Compare simplified exposure estimates for residents, homes, roads, and asset exposure.', icon: BarChart3 },
+    { title: 'DPWH project overlay', body: 'Load geocoded flood-control projects from PostGIS and inspect project details directly on the map.', icon: MapPinned },
+    { title: 'Fast viewport search', body: 'Use bounding-box lookups to keep project pins responsive as planners pan and zoom.', icon: BarChart3 },
   ];
 
   const mobileNav = [
     { key: 'map' as const, label: 'Map', icon: Home },
     { key: 'browse' as const, label: 'Browse', icon: SlidersHorizontal },
     { key: 'terrain' as const, label: '3D', icon: Mountain },
-    { key: 'simulate' as const, label: 'Sim', icon: Factory },
-    { key: 'impact' as const, label: 'Impact', icon: BarChart3 },
   ];
 
   const mapProps = { scenario, opacity, visibleLayers, selectedLocation, terrainEnabled, terrainExaggeration, drawingTool, projects, floodControlProjects: filteredFloodControlProjects, onPlaceProject: placeProject, onSelectFloodControlProject: setSelectedFloodControlProject, onViewportChange: handleViewportChange, navigationSeq };
 
   const controlsPanel = (
     <div className="h-full space-y-5 overflow-y-auto pr-1">
-      <div className="rounded-3xl border border-cyan-200/20 bg-slate-950/90 p-5 shadow-2xl backdrop-blur-2xl">
+      <div className="rounded-3xl border border-blue-100 bg-white/90 p-5 shadow-2xl backdrop-blur-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-[0.24em] text-cyan-200">Terrain workspace</div>
+            <div className="text-xs uppercase tracking-[0.24em] text-primary">Terrain workspace</div>
             <h2 className="mt-2 text-2xl font-black">3D flood map</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-300">Full-screen map with a single control panel. Pan, zoom, rotate, inspect tiles, and place projects without scrolling through a page.</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">Full-screen map with a single control panel. Pan, zoom, rotate, inspect tiles, and place projects without scrolling through a page.</p>
           </div>
-          <button onClick={() => setDesktopView('landing')} className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">Landing</button>
+          <button onClick={() => setDesktopView('landing')} className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-100">Landing</button>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-          <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Scenario</div><div className="font-bold text-cyan-200">{scenario.name}</div></div>
-          <div className="rounded-2xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-cyan-200">{selectedLocation.name}</div></div>
-          <div className="col-span-2 rounded-2xl bg-orange-300/10 p-3"><div className="text-slate-400">Flood-control projects</div><div className="font-bold text-orange-200">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} in view${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div><div className="mt-1 text-xs text-orange-100/70">Auto-updates as you pan/zoom{projectSearchState.query ? ` · query: ${projectSearchState.query}` : ''}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
+          <div className="rounded-2xl bg-gray-50 p-3"><div className="text-gray-500">Scenario</div><div className="font-bold text-primary">{scenario.name}</div></div>
+          <div className="rounded-2xl bg-gray-50 p-3"><div className="text-gray-500">Location</div><div className="font-bold text-primary">{selectedLocation.name}</div></div>
+          <div className="col-span-2 rounded-2xl bg-amber-50 p-3"><div className="text-gray-500">Flood-control projects</div><div className="font-bold text-amber-800">{projectSearchState.loading ? 'Loading…' : `${fmtNumber(filteredFloodControlProjects.length)} in view${floodControlProjects.length > filteredFloodControlProjects.length ? ` / ${fmtNumber(floodControlProjects.length)} loaded` : projectSearchState.total > floodControlProjects.length ? ` / ${fmtNumber(projectSearchState.total)} matches` : ''}`}</div><div className="mt-1 text-xs text-amber-700/70">Auto-updates as you pan/zoom{projectSearchState.query ? ` · query: ${projectSearchState.query}` : ''}</div>{projectSearchState.error && <div className="mt-1 text-xs text-red-300">{projectSearchState.error}</div>}</div>
         </div>
       </div>
 
-      <div className="rounded-3xl border border-orange-200/20 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.2em] text-orange-200">Project overlay</div><h3 className="mt-1 font-bold text-white">DPWH flood-control filters</h3></div><label className="flex items-center gap-2 text-sm text-orange-100"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label></div>
-        <div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => { setProjectFilter(filter.key); setSelectedFloodControlProject(null); }} className={`rounded-2xl border p-3 text-left text-sm transition ${projectFilter === filter.key ? 'border-orange-300 bg-orange-300 text-slate-950' : 'border-white/10 bg-white/5 text-white hover:bg-white/10'}`}><span className="block font-semibold">{filter.label}</span><span className="mt-1 block text-xs opacity-75">{filter.description}</span></button>)}</div>
+      <div className="rounded-3xl border border-amber-200 bg-white/90 p-5 backdrop-blur-2xl">
+        <div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.2em] text-amber-800">Project overlay</div><h3 className="mt-1 font-bold text-gray-900">DPWH flood-control filters</h3></div><label className="flex items-center gap-2 text-sm text-amber-800"><span>Map pins</span><input type="checkbox" checked={visibleLayers.projects} onChange={() => toggleLayer('projects')} /></label></div>
+        <div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => { setProjectFilter(filter.key); setSelectedFloodControlProject(null); }} className={`rounded-2xl border p-3 text-left text-sm transition ${projectFilter === filter.key ? 'border-amber-300 bg-amber-300 text-gray-900' : 'border-gray-200 bg-gray-50 text-gray-900 hover:bg-gray-100'}`}><span className="block font-semibold">{filter.label}</span><span className="mt-1 block text-xs opacity-75">{filter.description}</span></button>)}</div>
       </div>
 
       {selectedFloodControlProject && (
-        <div className="rounded-3xl border border-orange-200/20 bg-orange-950/30 p-5 backdrop-blur-2xl">
-          <div className="text-xs uppercase tracking-[0.2em] text-orange-200">Selected DPWH project</div>
-          <h3 className="mt-2 text-lg font-black text-white">{selectedFloodControlProject.contractId}</h3>
-          <p className="mt-2 line-clamp-4 text-sm leading-6 text-orange-50/85">{selectedFloodControlProject.description}</p>
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 backdrop-blur-2xl">
+          <div className="text-xs uppercase tracking-[0.2em] text-amber-800">Selected DPWH project</div>
+          <h3 className="mt-2 text-lg font-black text-gray-900">{selectedFloodControlProject.contractId}</h3>
+          <p className="mt-2 line-clamp-4 text-sm leading-6 text-gray-700">{selectedFloodControlProject.description}</p>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-xl bg-white/5 p-3"><div className="text-slate-400">Budget</div><div className="font-bold text-orange-200">{fmtPeso(selectedFloodControlProject.budget)}</div></div>
-            <div className="rounded-xl bg-white/5 p-3"><div className="text-slate-400">Progress</div><div className="font-bold text-orange-200">{Math.round(selectedFloodControlProject.progress ?? 0)}%</div></div>
-            <div className="col-span-2 rounded-xl bg-white/5 p-3"><div className="text-slate-400">Location</div><div className="font-bold text-orange-100">{projectLocation(selectedFloodControlProject)}</div></div>
-            <div className="col-span-2 rounded-xl bg-white/5 p-3"><div className="text-slate-400">Contractor</div><div className="font-bold text-orange-100">{selectedFloodControlProject.contractor || 'n/a'}</div></div>
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-gray-500">Budget</div><div className="font-bold text-amber-800">{fmtPeso(selectedFloodControlProject.budget)}</div></div>
+            <div className="rounded-xl bg-gray-50 p-3"><div className="text-gray-500">Progress</div><div className="font-bold text-amber-800">{Math.round(selectedFloodControlProject.progress ?? 0)}%</div></div>
+            <div className="col-span-2 rounded-xl bg-gray-50 p-3"><div className="text-gray-500">Location</div><div className="font-bold text-amber-800">{projectLocation(selectedFloodControlProject)}</div></div>
+            <div className="col-span-2 rounded-xl bg-gray-50 p-3"><div className="text-gray-500">Contractor</div><div className="font-bold text-amber-800">{selectedFloodControlProject.contractor || 'n/a'}</div></div>
           </div>
         </div>
       )}
 
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><Clock3 className="h-4 w-4 text-cyan-300" /> Flood scenario</div>
+      <div className="rounded-3xl border border-gray-200 bg-white/90 p-5 backdrop-blur-2xl">
+        <div className="mb-3 flex items-center gap-2 font-bold"><Clock3 className="h-4 w-4 text-primary" /> Flood scenario</div>
         <div className="mt-3"><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><MapPinned className="h-4 w-4 text-cyan-300" /> Jump to area</div>
+      <div className="rounded-3xl border border-gray-200 bg-white/90 p-5 backdrop-blur-2xl">
+        <div className="mb-3 flex items-center gap-2 font-bold"><MapPinned className="h-4 w-4 text-primary" /> Jump to area</div>
         <div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => jumpToLocation(location)}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><Mountain className="h-4 w-4 text-cyan-300" /> 3D terrain</div>
-        <label className="flex items-center justify-between gap-4 rounded-2xl bg-white/5 px-4 py-3"><span><span className="block font-semibold">Enable 3D terrain</span><span className="text-sm text-slate-400">DEM terrain + hillshade</span></span><input type="checkbox" checked={terrainEnabled} onChange={() => setTerrainEnabled((value) => !value)} /></label>
-        <label className="mt-3 block rounded-2xl bg-white/5 p-4"><span className="font-semibold">Exaggeration: {terrainExaggeration.toFixed(1)}×</span><input className="mt-2 w-full accent-cyan-300" type="range" min="0.5" max="5" step="0.1" value={terrainExaggeration} onChange={(event) => setTerrainExaggeration(Number(event.target.value))} /></label>
+      <div className="rounded-3xl border border-gray-200 bg-white/90 p-5 backdrop-blur-2xl">
+        <div className="mb-3 flex items-center gap-2 font-bold"><Mountain className="h-4 w-4 text-primary" /> 3D terrain</div>
+        <label className="flex items-center justify-between gap-4 rounded-2xl bg-gray-50 px-4 py-3"><span><span className="block font-semibold">Enable 3D terrain</span><span className="text-sm text-gray-500">DEM terrain + hillshade</span></span><input type="checkbox" checked={terrainEnabled} onChange={() => setTerrainEnabled((value) => !value)} /></label>
+        <label className="mt-3 block rounded-2xl bg-gray-50 p-4"><span className="font-semibold">Exaggeration: {terrainExaggeration.toFixed(1)}×</span><input className="mt-2 w-full accent-primary" type="range" min="0.5" max="5" step="0.1" value={terrainExaggeration} onChange={(event) => setTerrainExaggeration(Number(event.target.value))} /></label>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><Eye className="h-4 w-4 text-cyan-300" /> Layers</div>
-        <div className="space-y-2">{([{ key: 'flood', label: 'Flood scenario + national concentration' }, { key: 'landslide', label: 'Landslide hazards' }, { key: 'stormSurge', label: 'Storm surge hazards' }, { key: 'debrisFlow', label: 'Debris-flow hazards' }, { key: 'projects', label: 'DPWH flood-control projects' }, { key: 'buildings', label: '3D buildings' }, { key: 'houses', label: 'Houses / residential footprints' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-2 text-sm"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div>
-        <label className="mt-4 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-2 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
-      </div>
-
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><Factory className="h-4 w-4 text-cyan-300" /> Simulation tools</div>
-        <div className="grid gap-2">{infrastructureTools.map((tool) => <AppButton key={tool.name} active={drawingTool === tool.name} onClick={() => setDrawingTool((active) => (active === tool.name ? null : tool.name))}><span className="font-semibold">{tool.name}</span><span className="block text-xs opacity-75">{tool.params}</span></AppButton>)}</div>
-        <div className="mt-3 rounded-2xl bg-emerald-300/10 p-4 text-emerald-200"><div className="text-sm">Protection factor</div><div className="text-3xl font-black">{Math.round(totalBenefit * 100)}%</div><div className="mt-1 text-xs text-emerald-100/70">Placed projects: {projects.length}</div></div>
-        <button onClick={() => setProjects([])} className="mt-3 w-full rounded-full border border-white/15 px-4 py-2 text-sm hover:bg-white/10">Clear simulation</button>
-      </div>
-
-      <div className="rounded-3xl border border-white/10 bg-slate-950/90 p-5 backdrop-blur-2xl">
-        <div className="mb-3 flex items-center gap-2 font-bold"><BarChart3 className="h-4 w-4 text-cyan-300" /> Impact estimate</div>
-        <div className="grid gap-2">{impactCards.map(({ label, before, after: afterValue }) => <div key={label} className="grid grid-cols-[1fr_auto] gap-3 rounded-2xl bg-white/5 p-3 text-sm"><div><div className="text-slate-400">{label}</div><div className="font-bold">{before}</div></div><div className="text-right text-emerald-300"><div className="text-xs">after</div><div className="font-bold">{afterValue}</div></div></div>)}</div>
-      </div>
     </div>
   );
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
+    <main className="min-h-screen bg-white text-gray-900">
       <div className="fixed inset-0 md:hidden">
         <MapPreview {...mapProps} mobileApp />
 
         {mobilePanel !== 'map' && (
-          <section className="absolute bottom-[5.8rem] left-3 right-3 z-20 max-h-[58svh] overflow-hidden rounded-[1.75rem] border border-white/15 bg-slate-950/95 shadow-2xl backdrop-blur-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <section className="absolute bottom-[5.8rem] left-3 right-3 z-20 max-h-[58svh] overflow-hidden rounded-[1.75rem] border border-gray-200 bg-white/95 shadow-2xl backdrop-blur-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
               <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-cyan-200">Controls</div>
-                <h2 className="text-lg font-bold">{mobilePanel === 'browse' ? 'Hazard browser' : mobilePanel === 'terrain' ? '3D terrain' : mobilePanel === 'simulate' ? 'Simulation' : 'Impact'}</h2>
+                <div className="text-xs uppercase tracking-[0.2em] text-primary">Controls</div>
+                <h2 className="text-lg font-bold">{mobilePanel === 'browse' ? 'Hazard browser' : '3D terrain'}</h2>
               </div>
-              <button onClick={() => setMobilePanel('map')} className="grid h-10 w-10 place-items-center rounded-full bg-white/10"><X className="h-5 w-5" /></button>
+              <button onClick={() => setMobilePanel('map')} className="grid h-10 w-10 place-items-center rounded-full bg-gray-100"><X className="h-5 w-5" /></button>
             </div>
             <div className="max-h-[calc(58svh-4.5rem)] overflow-y-auto p-4">
               {mobilePanel === 'browse' && (
                 <div className="space-y-5">
                   <div><h3 className="mb-2 font-semibold">Flood scenario</h3><ScenarioControls scenarioName={scenarioName} setScenarioName={setScenarioName} /></div>
                   <div><h3 className="mb-2 font-semibold">Jump to area</h3><div className="grid gap-2">{locations.map((location) => <AppButton key={location.name} active={selectedLocation.name === location.name} onClick={() => { jumpToLocation(location); setMobilePanel('map'); }}><span className="font-semibold">{location.name}</span><span className="block text-xs opacity-75">{location.subtitle}</span></AppButton>)}</div></div>
-                  <div className="rounded-2xl bg-orange-300/10 p-4 text-sm text-orange-100"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} in current view</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-orange-300 text-slate-950' : 'bg-white/10 text-orange-50'}`}>{filter.label}</button>)}</div></div>
-                  <div><h3 className="mb-2 font-semibold">Layers</h3><div className="space-y-2">{([{ key: 'flood', label: 'Flood' }, { key: 'landslide', label: 'Landslide' }, { key: 'stormSurge', label: 'Storm surge' }, { key: 'debrisFlow', label: 'Debris flow' }, { key: 'projects', label: 'DPWH projects' }, { key: 'buildings', label: 'Buildings' }, { key: 'houses', label: 'Houses' }] as Array<{ key: LayerKey; label: string }>).map((item) => <label key={item.key} className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3"><span>{item.label}</span><input type="checkbox" checked={visibleLayers[item.key]} onChange={() => toggleLayer(item.key)} /></label>)}</div><label className="mt-3 block text-sm text-slate-300">Opacity: {Math.round(opacity * 100)}%<input className="mt-1 w-full accent-cyan-300" type="range" min="0.15" max="0.9" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label></div>
+                  <div className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-800"><div><span className="font-bold">DPWH flood-control pins:</span> {projectSearchState.loading ? 'Loading…' : fmtNumber(filteredFloodControlProjects.length)} in current view</div><div className="mt-3 grid grid-cols-2 gap-2">{projectFilters.map((filter) => <button key={filter.key} onClick={() => setProjectFilter(filter.key)} className={`rounded-xl px-3 py-2 text-left text-xs ${projectFilter === filter.key ? 'bg-amber-300 text-gray-900' : 'bg-gray-100 text-amber-800'}`}>{filter.label}</button>)}</div></div>
                 </div>
               )}
 
               {mobilePanel === 'terrain' && (
                 <div className="space-y-4">
-                  <p className="text-sm leading-6 text-slate-300">Tilt and rotate the map like a 3D mobile GIS viewer. DEM terrain and hillshade stay behind the NOAH hazard layer.</p>
-                  <label className="flex items-center justify-between rounded-2xl bg-white/5 px-4 py-4"><span><span className="block font-semibold">Enable 3D terrain</span><span className="text-sm text-slate-400">DEM + hillshade</span></span><input type="checkbox" checked={terrainEnabled} onChange={() => setTerrainEnabled((value) => !value)} /></label>
-                  <label className="block rounded-2xl bg-white/5 p-4"><span className="font-semibold">Exaggeration: {terrainExaggeration.toFixed(1)}×</span><input className="mt-2 w-full accent-cyan-300" type="range" min="0.5" max="5" step="0.1" value={terrainExaggeration} onChange={(event) => setTerrainExaggeration(Number(event.target.value))} /></label>
+                  <p className="text-sm leading-6 text-gray-600">Tilt and rotate the map like a 3D mobile GIS viewer. DEM terrain and hillshade stay behind the NOAH hazard layer.</p>
+                  <label className="flex items-center justify-between rounded-2xl bg-gray-50 px-4 py-4"><span><span className="block font-semibold">Enable 3D terrain</span><span className="text-sm text-gray-500">DEM + hillshade</span></span><input type="checkbox" checked={terrainEnabled} onChange={() => setTerrainEnabled((value) => !value)} /></label>
+                  <label className="block rounded-2xl bg-gray-50 p-4"><span className="font-semibold">Exaggeration: {terrainExaggeration.toFixed(1)}×</span><input className="mt-2 w-full accent-primary" type="range" min="0.5" max="5" step="0.1" value={terrainExaggeration} onChange={(event) => setTerrainExaggeration(Number(event.target.value))} /></label>
                 </div>
               )}
 
-              {mobilePanel === 'simulate' && (
-                <div className="space-y-4">
-                  <p className="text-sm leading-6 text-slate-300">Choose one project, then tap directly on the map. The control drawer will close so placement feels like a mobile map app.</p>
-                  <div className="grid gap-2">{infrastructureTools.map((tool) => <AppButton key={tool.name} active={drawingTool === tool.name} onClick={() => { setDrawingTool((active) => (active === tool.name ? null : tool.name)); setMobilePanel('map'); }}><span className="font-semibold">{tool.name}</span><span className="block text-xs opacity-75">{tool.params}</span></AppButton>)}</div>
-                  <div className="rounded-2xl bg-white/5 p-4"><div className="font-semibold">Placed projects: {projects.length}</div><div className="text-sm text-slate-400">Protection factor: {Math.round(totalBenefit * 100)}%</div><button onClick={() => setProjects([])} className="mt-3 w-full rounded-full border border-white/15 px-4 py-2 text-sm">Clear simulation</button></div>
-                </div>
-              )}
-
-              {mobilePanel === 'impact' && (
-                <div className="space-y-3">
-                  <div className="rounded-2xl bg-emerald-300/10 p-4 text-emerald-200"><div className="text-sm">Estimated protection</div><div className="text-3xl font-black">{Math.round(totalBenefit * 100)}%</div></div>
-                  {impactCards.map(({ label, before, after: afterValue, icon: Icon }) => <div key={label} className="rounded-2xl bg-white/5 p-4"><div className="flex items-center gap-2 text-sm text-slate-400"><Icon className="h-4 w-4 text-cyan-300" /> {label}</div><div className="mt-2 grid grid-cols-2 gap-2"><div><div className="text-xl font-black">{before}</div><div className="text-xs text-slate-500">before</div></div><div className="rounded-xl bg-emerald-300/10 px-3 py-2 text-emerald-300"><div className="text-xl font-black">{afterValue}</div><div className="text-xs">after</div></div></div></div>)}
-                  {projects.length > 0 && <div className="space-y-2">{projects.map((project) => <div key={project.id} className="rounded-xl bg-white/5 px-3 py-2 text-sm"><span className="font-semibold">{project.label}</span><span className="block text-xs text-slate-400">{project.params}</span></div>)}</div>}
-                </div>
-              )}
             </div>
           </section>
         )}
 
-        <nav className="absolute bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-slate-950/95 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-2xl">
-          <div className="grid grid-cols-5 gap-1">
-            {mobileNav.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => setMobilePanel(key)} className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold ${mobilePanel === key ? 'bg-cyan-300 text-slate-950' : 'text-slate-300'}`}><Icon className="h-5 w-5" />{label}</button>)}
+        <nav className="absolute bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-2xl">
+          <div className="grid grid-cols-3 gap-1">
+            {mobileNav.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => setMobilePanel(key)} className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold ${mobilePanel === key ? 'bg-primary text-white' : 'text-gray-600'}`}><Icon className="h-5 w-5" />{label}</button>)}
           </div>
         </nav>
       </div>
@@ -859,32 +809,32 @@ export default function App() {
       <div className="hidden md:block">
         {desktopView === 'landing' ? (
           <div className="relative isolate min-h-screen overflow-hidden px-6 py-8 lg:px-10">
-            <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.22),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(59,130,246,0.16),transparent_34%)]" />
-            <nav className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-white/10 bg-white/5 px-5 py-3 backdrop-blur-xl">
-              <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-full bg-cyan-300 text-slate-950"><Droplets className="h-5 w-5" /></div><div><div className="font-semibold">FloodLens PH</div><div className="text-xs text-cyan-100/70">NOAH-powered planning platform</div></div></div>
-              <div className="flex items-center gap-3 text-sm"><button onClick={() => setDesktopView('landing')} className="rounded-full px-4 py-2 text-slate-300 hover:bg-white/10">Landing</button><button onClick={() => setDesktopView('terrain')} className="rounded-full bg-cyan-300 px-4 py-2 font-semibold text-slate-950">Open 3D terrain</button></div>
+            <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_48%,#eef4ff_100%)]" />
+            <nav className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-gray-200 bg-gray-50 px-5 py-3 backdrop-blur-xl">
+              <div className="flex items-center gap-3"><img src="/bettergov-logo-icon.png" alt="BetterGov" className="h-10 w-10 rounded-full" /><div><div className="font-semibold">FloodLens PH</div><div className="text-xs text-blue-700/70">BetterGov planning platform</div></div></div>
+              <div className="flex items-center gap-3 text-sm"><button onClick={() => setDesktopView('landing')} className="rounded-full px-4 py-2 text-gray-600 hover:bg-gray-100">Landing</button><button onClick={() => setDesktopView('terrain')} className="rounded-full bg-primary px-4 py-2 font-semibold text-white">Open 3D terrain</button></div>
             </nav>
 
             <section className="mx-auto grid max-w-7xl gap-10 py-16 lg:grid-cols-[0.72fr_1.28fr] lg:items-center">
               <div>
-                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100"><Shield className="h-4 w-4" /> 3D terrain + simulation</div>
-                <h1 className="text-5xl font-black tracking-tight text-white md:text-7xl">Browse hazards, tilt terrain, test interventions.</h1>
-                <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">FloodLens starts with a Philippines-wide flood concentration view, then streams only the PMTiles byte ranges needed as planners zoom into NOAH hazard data.</p>
-                <div className="mt-8 flex gap-3"><button onClick={() => setDesktopView('terrain')} className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-300 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200">Open 3D terrain <ChevronRight className="h-4 w-4" /></button><button onClick={() => { setDesktopView('terrain'); setDrawingTool('Retention Basin'); }} className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-6 py-3 font-semibold text-white hover:bg-white/10"><Factory className="h-4 w-4" /> Simulate projects</button></div>
+                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-blue-50 px-4 py-2 text-sm text-blue-700"><Shield className="h-4 w-4" /> 3D terrain + DPWH projects</div>
+                <h1 className="text-5xl font-black tracking-tight text-gray-900 md:text-7xl">Browse hazards, tilt terrain, inspect projects.</h1>
+                <p className="mt-6 max-w-2xl text-lg leading-8 text-gray-600">FloodLens starts with a Philippines-wide flood concentration view, then streams only the PMTiles byte ranges needed as planners zoom into NOAH hazard data.</p>
+                <div className="mt-8 flex gap-3"><button onClick={() => setDesktopView('terrain')} className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 font-semibold text-white transition hover:bg-blue-600">Open 3D terrain <ChevronRight className="h-4 w-4" /></button></div>
               </div>
               <MapPreview {...mapProps} />
             </section>
 
             <section className="mx-auto max-w-7xl pb-20">
-              <div className="mb-6 flex items-end justify-between gap-6"><div><div className="text-sm uppercase tracking-[0.24em] text-cyan-200">Features</div><h2 className="mt-2 text-3xl font-black">Built for map-first flood planning</h2></div><div className="rounded-full border border-cyan-200/20 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100"><Database className="mr-2 inline h-4 w-4" /> PMTiles range loading</div></div>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{featureCards.map(({ title, body, icon: Icon }) => <article key={title} className="rounded-[1.75rem] border border-white/10 bg-white/[0.04] p-6"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-cyan-300/10 text-cyan-200"><Icon className="h-6 w-6" /></div><h3 className="mt-5 text-xl font-bold">{title}</h3><p className="mt-3 text-sm leading-6 text-slate-400">{body}</p></article>)}</div>
+              <div className="mb-6 flex items-end justify-between gap-6"><div><div className="text-sm uppercase tracking-[0.24em] text-primary">Features</div><h2 className="mt-2 text-3xl font-black">Built for map-first flood planning</h2></div><div className="rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700"><Database className="mr-2 inline h-4 w-4" /> PMTiles range loading</div></div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{featureCards.map(({ title, body, icon: Icon }) => <article key={title} className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-primary"><Icon className="h-6 w-6" /></div><h3 className="mt-5 text-xl font-bold">{title}</h3><p className="mt-3 text-sm leading-6 text-gray-500">{body}</p></article>)}</div>
             </section>
           </div>
         ) : (
-          <section className="fixed inset-0 bg-slate-950">
+          <section className="fixed inset-0 bg-white">
             <MapPreview {...mapProps} fullScreen />
-            <aside className="absolute bottom-6 right-6 top-6 z-20 w-[430px] max-w-[calc(100vw-3rem)] rounded-[2rem] border border-white/15 bg-slate-950/88 p-4 shadow-2xl backdrop-blur-2xl">{controlsPanel}</aside>
-            <div className="pointer-events-none absolute bottom-6 left-6 z-10 rounded-2xl border border-white/15 bg-slate-950/80 px-4 py-3 text-sm text-slate-300 backdrop-blur-xl"><span className="font-semibold text-cyan-200">Tip:</span> use the panel to jump locations; rotate and pitch directly on the map.</div>
+            <aside className="absolute bottom-6 right-6 top-6 z-20 w-[430px] max-w-[calc(100vw-3rem)] rounded-[2rem] border border-gray-200 bg-white/88 p-4 shadow-2xl backdrop-blur-2xl">{controlsPanel}</aside>
+            <div className="pointer-events-none absolute bottom-6 left-6 z-10 rounded-2xl border border-gray-200 bg-white/80 px-4 py-3 text-sm text-gray-600 backdrop-blur-xl"><span className="font-semibold text-primary">Tip:</span> use the panel to jump locations; rotate and pitch directly on the map.</div>
           </section>
         )}
       </div>
