@@ -152,6 +152,7 @@ function fmtDate(value?: string) {
 function projectPopoverHtml(project: FloodControlProject) {
   const progress = typeof project.progress === 'number' && Number.isFinite(project.progress) ? Math.round(project.progress) : 0;
   const location = [project.location?.barangay, project.location?.municipality, project.location?.province, project.location?.region].filter(Boolean).join(', ') || 'Unknown location';
+  const reportUrl = `https://bisto.ph/project/${encodeURIComponent(project.contractId)}`;
 
   return `
     <div class="floodlens-project-popup">
@@ -172,6 +173,7 @@ function projectPopoverHtml(project: FloodControlProject) {
         <div><strong style="color:#6b7280">Timeline:</strong> ${escapeHtml(fmtDate(project.startDate))} → ${escapeHtml(fmtDate(project.completionDate))}</div>
         <div><strong style="color:#6b7280">Reports:</strong> ${fmtNumber(project.reportCount ?? 0)} · <strong style="color:#6b7280">Satellite:</strong> ${project.hasSatelliteImage ? 'yes' : 'no'}</div>
       </div>
+      <a href="${escapeHtml(reportUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;width:100%;margin-top:14px;border-radius:10px;background:#0d56ad;color:#ffffff;font-size:13px;font-weight:800;line-height:1;text-align:center;padding:12px 14px;text-decoration:none">Report a problem</a>
     </div>
   `;
 }
