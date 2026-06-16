@@ -837,6 +837,10 @@ export default function App() {
             <section className="mx-auto max-w-7xl pb-20">
               <div className="mb-6 flex items-end justify-between gap-6"><div><div className="text-sm uppercase tracking-[0.24em] text-primary">Features</div><h2 className="mt-2 text-3xl font-black">Built for map-first flood planning</h2></div><div className="rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700"><Database className="mr-2 inline h-4 w-4" /> PMTiles range loading</div></div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{featureCards.map(({ title, body, icon: Icon }) => <article key={title} className="rounded-[1.75rem] border border-gray-200 bg-white p-6 shadow-sm"><div className="grid h-12 w-12 place-items-center rounded-2xl bg-blue-50 text-primary"><Icon className="h-6 w-6" /></div><h3 className="mt-5 text-xl font-bold">{title}</h3><p className="mt-3 text-sm leading-6 text-gray-500">{body}</p></article>)}</div>
+              <footer className="mt-10 border-t border-gray-200 pt-6 text-sm leading-6 text-gray-500">
+                <div className="font-semibold text-gray-800">Flood Watch by BetterGov.ph</div>
+                <div className="mt-1">Thanks to our partners from DPWH and Project NOAH for the public infrastructure and flood hazard data that make this map possible.</div>
+              </footer>
             </section>
           </div>
         ) : (
