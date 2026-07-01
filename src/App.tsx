@@ -360,6 +360,7 @@ function MapPreview({
   const onViewportChangeRef = useRef(onViewportChange);
   const floodControlProjectsRef = useRef(floodControlProjects);
   const fundingBufferRef = useRef<'a' | 'b'>('a');
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
     drawingToolRef.current = drawingTool;
@@ -373,37 +374,56 @@ function MapPreview({
     if (!ref.current || mapRef.current) return;
     ensurePmtilesProtocol();
 
-    const map = new maplibregl.Map({
-      container: ref.current,
-      style: {
-        version: 8,
-        transition: { duration: 650, delay: 0 },
-        sources: {
-          osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' },
-          noah: { type: 'vector', url: `pmtiles://${window.location.origin}${datasetUrl}`, attribution: 'Project NOAH / BetterGov.ph' },
-          floodConcentration: { type: 'geojson', data: floodConcentration },
-          'terrain-dem': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', attribution: 'Terrain: AWS Open Data Terrarium DEM' },
-          // OSMBuildings' standalone package is Leaflet/OpenLayers-era and does not
-          // integrate cleanly with MapLibre. OpenFreeMap exposes the same OSM-derived
-          // building footprints as vector tiles, so render them natively with
-          // MapLibre fill-extrusion layers instead.
-          buildings: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
-          floodControlProjects: { type: 'geojson', data: asProjectGeojson([]) },
-          fundingHeatmapA: { type: 'geojson', data: emptyFeatureCollection() },
-          fundingHeatmapB: { type: 'geojson', data: emptyFeatureCollection() },
-          mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
+    const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+    let map: maplibregl.Map;
+
+    try {
+      map = new maplibregl.Map({
+        container: ref.current,
+        style: {
+          version: 8,
+          transition: { duration: 650, delay: 0 },
+          sources: {
+            osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' },
+            noah: { type: 'vector', url: `pmtiles://${window.location.origin}${datasetUrl}`, attribution: 'Project NOAH / BetterGov.ph' },
+            floodConcentration: { type: 'geojson', data: floodConcentration },
+            'terrain-dem': { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], tileSize: 256, encoding: 'terrarium', attribution: 'Terrain: AWS Open Data Terrarium DEM' },
+            // OSMBuildings' standalone package is Leaflet/OpenLayers-era and does not
+            // integrate cleanly with MapLibre. OpenFreeMap exposes the same OSM-derived
+            // building footprints as vector tiles, so render them natively with
+            // MapLibre fill-extrusion layers instead.
+            buildings: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: 'OpenFreeMap / OpenMapTiles / OpenStreetMap' },
+            floodControlProjects: { type: 'geojson', data: asProjectGeojson([]) },
+            fundingHeatmapA: { type: 'geojson', data: emptyFeatureCollection() },
+            fundingHeatmapB: { type: 'geojson', data: emptyFeatureCollection() },
+            mitigation: { type: 'geojson', data: asMitigationGeojson([]) },
+          },
+          layers: [
+            { id: 'osm', type: 'raster', source: 'osm' },
+            { id: 'hillshade', type: 'hillshade', source: 'terrain-dem', paint: { 'hillshade-shadow-color': '#0f172a', 'hillshade-highlight-color': '#e0f2fe', 'hillshade-accent-color': '#0891b2' }, layout: { visibility: 'none' } },
+          ],
         },
-        layers: [
-          { id: 'osm', type: 'raster', source: 'osm' },
-          { id: 'hillshade', type: 'hillshade', source: 'terrain-dem', paint: { 'hillshade-shadow-color': '#0f172a', 'hillshade-highlight-color': '#e0f2fe', 'hillshade-accent-color': '#0891b2' }, layout: { visibility: 'none' } },
-        ],
-      },
-      center: initialLocationRef.current.center,
-      zoom: initialLocationRef.current.zoom,
-      pitch: initialLocationRef.current.national ? 0 : 55,
-      bearing: initialLocationRef.current.national ? 0 : -18,
-      maxPitch: 85,
-    });
+        canvasContextAttributes: {
+          antialias: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'default',
+          failIfMajorPerformanceCaveat: false,
+          desynchronized: false,
+          contextType: isFirefox ? 'webgl' : undefined,
+        },
+        center: initialLocationRef.current.center,
+        zoom: initialLocationRef.current.zoom,
+        pitch: initialLocationRef.current.national ? 0 : 55,
+        bearing: initialLocationRef.current.national ? 0 : -18,
+        maxPitch: 85,
+      });
+    } catch (error) {
+      console.error('MapLibre failed to initialize WebGL', error);
+      setMapError('Firefox could not create a WebGL context for the 3D map.');
+      return;
+    }
+
+    setMapError(null);
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
     map.dragRotate.enable();
@@ -744,7 +764,17 @@ function MapPreview({
   return (
     <div className={`relative overflow-hidden bg-white shadow-glow ${mobileApp ? 'h-full rounded-none border-0' : fullScreen ? 'h-full min-h-0 rounded-none border-0' : 'h-[68svh] min-h-[440px] rounded-[1.35rem] border border-blue-100 sm:h-[72svh] md:h-[660px] md:rounded-[2rem]'}`}>
       <div ref={ref} className={`absolute inset-0 ${drawingTool ? 'cursor-crosshair' : ''}`} />
-      <div className={`pointer-events-none absolute rounded-2xl border border-gray-200 bg-white/85 text-gray-900 backdrop-blur-xl ${mobileApp ? 'left-4 right-4 top-[max(1rem,env(safe-area-inset-top))] p-3' : 'left-3 right-3 top-3 p-3 sm:left-5 sm:right-auto sm:top-5 sm:max-w-sm sm:p-4'}`}>
+      {mapError && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-50 px-5">
+          <div className="max-w-md rounded-2xl border border-blue-100 bg-white p-5 text-center text-gray-900 shadow-xl">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-primary"><Mountain className="h-5 w-5" /></div>
+            <div className="mt-4 text-lg font-bold">3D map unavailable in this browser</div>
+            <p className="mt-2 text-sm leading-6 text-gray-600">{mapError} Enable hardware acceleration and WebGL, or open Flood Watch in Chrome, Edge, or Safari.</p>
+            <div className="mt-4 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">Flood layers, terrain, and project pins require WebGL.</div>
+          </div>
+        </div>
+      )}
+      {!mapError && <div className={`pointer-events-none absolute rounded-2xl border border-gray-200 bg-white/85 text-gray-900 backdrop-blur-xl ${mobileApp ? 'left-4 right-4 top-[max(1rem,env(safe-area-inset-top))] p-3' : 'left-3 right-3 top-3 p-3 sm:left-5 sm:right-auto sm:top-5 sm:max-w-sm sm:p-4'}`}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-primary sm:text-sm sm:tracking-[0.24em]"><Waves className="h-4 w-4" /> Flood Watch by BetterGov.ph</div>
@@ -754,9 +784,9 @@ function MapPreview({
           <div className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">LIVE</div>
         </div>
         {!mobileApp && <div className="mt-2 flex items-center gap-2 text-[11px] text-emerald-700 sm:mt-3 sm:text-xs"><Database className="h-3.5 w-3.5" /> PMTiles range loading</div>}
-      </div>
-      {drawingTool && <div className={`absolute z-10 rounded-2xl border border-amber-200 bg-amber-300 p-3 text-center text-sm font-semibold text-gray-900 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
-      {visibleLayers.funding && fundingYears.length > 0 && (
+      </div>}
+      {!mapError && drawingTool && <div className={`absolute z-10 rounded-2xl border border-amber-200 bg-amber-300 p-3 text-center text-sm font-semibold text-gray-900 shadow-xl ${mobileApp ? 'left-4 right-4 top-32' : 'bottom-3 left-3 right-3 sm:bottom-auto sm:left-auto sm:right-5 sm:top-24 sm:p-4 sm:text-left sm:text-base'}`}>Tap map to place: {drawingTool}</div>}
+      {!mapError && visibleLayers.funding && fundingYears.length > 0 && (
         <div className={`absolute z-20 rounded-xl border border-gray-200 bg-white/90 text-gray-900 shadow-2xl backdrop-blur-xl ${mobileApp ? 'bottom-[5.4rem] left-3 right-3 p-2.5' : fullScreen ? 'bottom-6 left-6 w-[min(540px,calc(100vw-36rem))] p-3' : 'bottom-5 left-1/2 w-[min(560px,calc(100%-2.5rem))] -translate-x-1/2 p-3'}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
@@ -810,7 +840,7 @@ function MapPreview({
           </div>
         </div>
       )}
-      {!mobileApp && !visibleLayers.funding && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-gray-200 bg-white/85 p-4 text-gray-900 backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-primary" /> {layer}</div>)}</div>}
+      {!mapError && !mobileApp && !visibleLayers.funding && <div className="absolute bottom-5 left-5 right-5 hidden gap-3 rounded-2xl border border-gray-200 bg-white/85 p-4 text-gray-900 backdrop-blur-xl sm:grid md:grid-cols-4">{['Click pins for project details', 'Pan / zoom / rotate enabled', 'NOAH flood layers', 'DPWH flood-control overlay'].map((layer) => <div key={layer} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm"><Layers3 className="h-4 w-4 text-primary" /> {layer}</div>)}</div>}
     </div>
   );
 }
